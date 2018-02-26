@@ -1,0 +1,12 @@
+Source: ros-indigo-rc-visard
+Section: misc
+Priority: extra
+Maintainer: Heiko Hirschmueller <heiko.hirschmueller@roboception.de>
+Build-Depends: debhelper (>= 9.0.0), ros-indigo-catkin
+Homepage: http://roboception.com/rc_visard
+Standards-Version: 3.9.2
+
+Package: ros-indigo-rc-visard
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, ros-indigo-rc-visard-driver
+Description: Roboception rc_visard support meta package
