@@ -1,0 +1,12 @@
+Source: ros-lunar-rc-visard-driver
+Section: misc
+Priority: extra
+Maintainer: Felix Ruess <felix.ruess@roboception.de>
+Build-Depends: debhelper (>= 9.0.0), curl, libcurl4-openssl-dev, libprotobuf-dev, libprotoc-dev, protobuf-compiler, ros-lunar-catkin, ros-lunar-dynamic-reconfigure, ros-lunar-geometry-msgs, ros-lunar-image-transport, ros-lunar-message-generation, ros-lunar-nav-msgs, ros-lunar-nodelet, ros-lunar-rc-dynamics-api (>= 0.5), ros-lunar-rc-genicam-api, ros-lunar-roscpp, ros-lunar-sensor-msgs, ros-lunar-std-srvs, ros-lunar-stereo-msgs, ros-lunar-tf, ros-lunar-visualization-msgs
+Homepage: http://roboception.com/rc_visard
+Standards-Version: 3.9.2
+
+Package: ros-lunar-rc-visard-driver
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, curl, libcurl4-openssl-dev, libprotobuf10, ros-lunar-dynamic-reconfigure, ros-lunar-geometry-msgs, ros-lunar-image-transport, ros-lunar-message-runtime, ros-lunar-nav-msgs, ros-lunar-nodelet, ros-lunar-rc-dynamics-api (>= 0.5), ros-lunar-rc-genicam-api, ros-lunar-roscpp, ros-lunar-sensor-msgs, ros-lunar-std-srvs, ros-lunar-stereo-msgs, ros-lunar-tf, ros-lunar-visualization-msgs
+Description: The rc_visard_driver provides data from a Roboception rc_visard 3D sensor on several ROS topics.
