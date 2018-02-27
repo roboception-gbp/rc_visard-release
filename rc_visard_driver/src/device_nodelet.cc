@@ -46,11 +46,12 @@
 #include <rc_genicam_api/stream.h>
 #include <rc_genicam_api/buffer.h>
 #include <rc_genicam_api/config.h>
+#include <rc_genicam_api/pixel_formats.h>
+
+#include <rc_dynamics_api/trajectory_time.h>
 
 #include <pluginlib/class_list_macros.h>
 #include <exception>
-
-#include <rc_genicam_api/pixel_formats.h>
 
 #include <sstream>
 #include <stdexcept>
@@ -78,6 +79,10 @@ ThreadedStream::Ptr DeviceNodelet::CreateDynamicsStreamOfType(
   if (stream=="pose_ins" || stream=="pose_rt" || stream=="pose_rt_ins" || stream=="imu")
   {
     return ThreadedStream::Ptr(new Protobuf2RosStream(rcdIface, stream, nh, frame_id_prefix));
+  }
+  if (stream=="dynamics" || "dynamics_ins")
+  {
+    return ThreadedStream::Ptr(new DynamicsStream(rcdIface, stream, nh, frame_id_prefix));
   }
 
   throw std::runtime_error(std::string("Not yet implemented! Stream type: ") + stream);
@@ -121,9 +126,19 @@ DeviceNodelet::~DeviceNodelet()
 
 void DeviceNodelet::onInit()
 {
-  // run initialization and recover routine in separate thread
+  std::string device;
+  getPrivateNodeHandle().param("device", device, device);
 
-  recoverThread = std::thread(&DeviceNodelet::keepAliveAndRecoverFromFails, this);
+  if (device.size() > 0)
+  {
+    // run initialization and recover routine in separate thread
+
+    recoverThread = std::thread(&DeviceNodelet::keepAliveAndRecoverFromFails, this);
+  }
+  else
+  {
+    ROS_FATAL("The rc_visard device ID must be given in the private parameter 'device'!");
+  }
 }
 
 void DeviceNodelet::keepAliveAndRecoverFromFails()
@@ -136,7 +151,7 @@ void DeviceNodelet::keepAliveAndRecoverFromFails()
   std::string access="control";
 
   tfEnabled = false;
-  autostartDynamics = autostopDynamics = false;
+  autostartDynamics = autostopDynamics = autostartSlam = autopublishTrajectory = false;
   std::string ns = tf::strip_leading_slash(ros::this_node::getNamespace());
   tfPrefix = (ns != "") ? ns + "_" : "";
 
@@ -144,7 +159,9 @@ void DeviceNodelet::keepAliveAndRecoverFromFails()
   pnh.param("gev_access", access, access);
   pnh.param("enable_tf", tfEnabled, tfEnabled);
   pnh.param("autostart_dynamics", autostartDynamics, autostartDynamics);
+  pnh.param("autostart_dynamics_with_slam", autostartSlam, autostartSlam);
   pnh.param("autostop_dynamics", autostopDynamics, autostopDynamics);
+  pnh.param("autopublish_trajectory", autopublishTrajectory, autopublishTrajectory);
 
   rcg::Device::ACCESS access_id;
   if (access == "exclusive")
@@ -167,14 +184,26 @@ void DeviceNodelet::keepAliveAndRecoverFromFails()
 
   // setup services for starting and stopping rcdynamics module
 
-  dynamicsStartService = pnh.advertiseService("startDynamics",
-                                              &DeviceNodelet::startDynamics, this);
-  dynamicsRestartService = pnh.advertiseService("restartDynamics",
-                                                &DeviceNodelet::restartDynamics, this);
-  dynamicsStopService = pnh.advertiseService("stopDynamics",
-                                             &DeviceNodelet::stopDynamics, this);
+  dynamicsStartService       = pnh.advertiseService("dynamics_start",
+                                                    &DeviceNodelet::dynamicsStart, this);
+  dynamicsStartSlamService   = pnh.advertiseService("dynamics_start_slam",
+                                                    &DeviceNodelet::dynamicsStartSlam, this);
+  dynamicsRestartService     = pnh.advertiseService("dynamics_restart",
+                                                    &DeviceNodelet::dynamicsRestart, this);
+  dynamicsRestartSlamService = pnh.advertiseService("dynamics_restart_slam",
+                                                  &DeviceNodelet::dynamicsRestartSlam, this);
+  dynamicsStopService        = pnh.advertiseService("dynamics_stop",
+                                                    &DeviceNodelet::dynamicsStop, this);
+  dynamicsStopSlamService    = pnh.advertiseService("dynamics_stop_slam",
+                                                    &DeviceNodelet::dynamicsStopSlam, this);
+  getSlamTrajectoryService   = pnh.advertiseService("get_trajectory",
+                                                    &DeviceNodelet::getSlamTrajectory, this);
+  if (autopublishTrajectory)
+  {
+    trajPublisher = getNodeHandle().advertise<nav_msgs::Path>("trajectory", 10);
+  }
 
-  // run start-keep-alive-and-recover loop
+  // run start-keep-alive-a  nd-recover loop
 
   static int maxNumRecoveryTrials = 5;
 
@@ -183,12 +212,9 @@ void DeviceNodelet::keepAliveAndRecoverFromFails()
   {
     // check if everything is running smoothly
 
-    recoveryRequested = recoveryRequested || dynamicsStreams->any_failed();
-
     if (!recoveryRequested)
     {
       bool allSucceeded = (!imageRequested || imageSuccess);
-      allSucceeded = allSucceeded && dynamicsStreams->all_succeeded();
       if ( (cntConsecutiveRecoveryFails > 0) && allSucceeded )
       {
         cntConsecutiveRecoveryFails = 0;
@@ -241,15 +267,18 @@ void DeviceNodelet::keepAliveAndRecoverFromFails()
         rcgdev->open(access_id);
         rcgnodemap=rcgdev->getRemoteNodeMap();
 
+        // instantiating dynamics interface and autostart dynamics on sensor if desired
+
         std::string currentIPAddress = rcg::getString(rcgnodemap, "GevCurrentIPAddress", true);
         dynamicsInterface = rcd::RemoteInterface::create(currentIPAddress);
-        if (autostartDynamics)
+        if (autostartDynamics || autostartSlam)
         {
           std_srvs::Trigger::Request dummyreq;
           std_srvs::Trigger::Response dummyresp;
-          if (!this->startDynamics(dummyreq, dummyresp))
+          if ( !(   (autostartSlam && this->dynamicsStartSlam(dummyreq, dummyresp))
+                  ||(autostartDynamics && this->dynamicsStart(dummyreq, dummyresp)) )  )
           { // autostart failed!
-            ROS_ERROR("rc_visard_driver: Could not auto-start dynamics module!");
+            ROS_WARN("rc_visard_driver: Could not auto-start dynamics module!");
             cntConsecutiveRecoveryFails++;
             continue; // to next trial!
           }
@@ -263,25 +292,20 @@ void DeviceNodelet::keepAliveAndRecoverFromFails()
         {
           try
           {
-            if (streamName != "dynamics" && streamName != "dynamics_ins")
-            {
-              auto newStream = CreateDynamicsStreamOfType(dynamicsInterface, streamName,
-                                                          getNodeHandle(), tfPrefix, tfEnabled);
-              dynamicsStreams->add(newStream);
-            }
-            else
-            {
-              ROS_INFO_STREAM("Unsupported dynamics stream: " << streamName);
-            }
-          } catch(const std::exception &e)
+            auto newStream = CreateDynamicsStreamOfType(dynamicsInterface, streamName,
+                                                        getNodeHandle(), tfPrefix, tfEnabled);
+            dynamicsStreams->add(newStream);
+          }
+          catch(const std::exception &e)
           {
-            ROS_WARN_STREAM("Unable to create dynamics stream of type "
+            ROS_WARN_STREAM("rc_visard_driver: Unable to create dynamics stream of type "
                             << streamName << ": " << e.what());
           }
         }
 
         successfullyOpened = true;
-      } catch (std::exception &ex)
+      }
+      catch (std::exception &ex)
       {
         cntConsecutiveRecoveryFails++;
         ROS_ERROR_STREAM("rc_visard_driver: " << ex.what());
@@ -309,9 +333,10 @@ void DeviceNodelet::keepAliveAndRecoverFromFails()
   {
     std_srvs::Trigger::Request dummyreq;
     std_srvs::Trigger::Response dummyresp;
-    if (!this->stopDynamics(dummyreq, dummyresp))
+    ROS_INFO("rc_visard_driver: Autostop dynamics ...");
+    if (!this->dynamicsStop(dummyreq, dummyresp))
     { // autostop failed!
-      ROS_ERROR("rc_visard_driver: Could not auto-stop dynamics module!");
+      ROS_WARN("rc_visard_driver: Could not auto-stop dynamics module!");
     }
   }
   std::cout << "rc_visard_driver: stopped." << std::endl;
@@ -984,63 +1009,137 @@ void DeviceNodelet::grab(std::string device, rcg::Device::ACCESS access)
 
 }
 
-void handleDynamicsStateChangeRequest(
-        rcd::RemoteInterface::Ptr dynIF,
-        int state, std_srvs::Trigger::Response &resp)
+//Anonymous namespace for local linkage
+namespace
 {
-  resp.success = true;
-  resp.message = "";
+  ///Commands taken by handleDynamicsStateChangeRequest()
+  enum class DynamicsCmd { START = 0, START_SLAM, STOP, STOP_SLAM, RESTART, RESTART_SLAM };
 
-  if (dynIF)
+  ///@return whether the service call has been accepted
+  void handleDynamicsStateChangeRequest(
+          rcd::RemoteInterface::Ptr dynIF,
+          DynamicsCmd state, std_srvs::Trigger::Response &resp)
   {
-    try
+    resp.success = true;
+    resp.message = "";
+
+    std::string new_state;
+
+    if (dynIF)
     {
-      switch (state) {
-        case 0: // STOP
-          dynIF->stop();
-          break;
-        case 1: // START
-          dynIF->start(false);
-          break;
-        case 2: // RESTART
-          dynIF->start(true);
-          break;
-        default:
-          throw std::runtime_error("handleDynamicsStateChangeRequest: unrecognized state change request");
+      try
+      {
+        switch (state)
+        {
+          case DynamicsCmd::STOP:         new_state = dynIF->stop();        break;
+          case DynamicsCmd::STOP_SLAM:    new_state = dynIF->stopSlam();    break;
+          case DynamicsCmd::START:        new_state = dynIF->start();       break;
+          case DynamicsCmd::START_SLAM:   new_state = dynIF->startSlam();   break;
+          case DynamicsCmd::RESTART_SLAM: new_state = dynIF->restartSlam(); break;
+          case DynamicsCmd::RESTART:      new_state = dynIF->restart();     break;
+          default:
+            throw std::runtime_error("handleDynamicsStateChangeRequest: unrecognized state change request");
+        }
+        if(new_state == rcd::RemoteInterface::State::FATAL)
+        {
+          resp.success = false;
+          resp.message = "rc_dynamics module is in " + new_state + " state. Check the log files.";
+        }
+      }
+      catch (std::exception &e)
+      {
+        resp.success = false;
+        resp.message = std::string("Failed to change state of rcdynamics module: ") + e.what();
       }
     }
-    catch (std::exception &e)
+    else
     {
       resp.success = false;
-      resp.message = std::string("Failed to change state of rcdynamics module: ") + e.what();
+      resp.message = "rcdynamics remote interface not yet initialized!";
     }
+
+    if (!resp.success) ROS_ERROR_STREAM(resp.message);
   }
-  else
+}
+
+bool DeviceNodelet::dynamicsStart(std_srvs::Trigger::Request &req,
+                                  std_srvs::Trigger::Response &resp)
+{
+  handleDynamicsStateChangeRequest(dynamicsInterface, DynamicsCmd::START, resp);
+  return true;
+}
+
+bool DeviceNodelet::dynamicsStartSlam(std_srvs::Trigger::Request &req,
+                                      std_srvs::Trigger::Response &resp)
+{
+  handleDynamicsStateChangeRequest(dynamicsInterface, DynamicsCmd::START_SLAM, resp);
+  return true;
+}
+
+bool DeviceNodelet::dynamicsRestart(std_srvs::Trigger::Request &req,
+                                    std_srvs::Trigger::Response &resp)
+{
+  handleDynamicsStateChangeRequest(dynamicsInterface, DynamicsCmd::RESTART, resp);
+  return true;
+}
+
+bool DeviceNodelet::dynamicsRestartSlam(std_srvs::Trigger::Request &req,
+                                        std_srvs::Trigger::Response &resp)
+{
+  handleDynamicsStateChangeRequest(dynamicsInterface, DynamicsCmd::RESTART_SLAM, resp);
+  return true;
+}
+
+bool DeviceNodelet::dynamicsStop(std_srvs::Trigger::Request &req,
+                                 std_srvs::Trigger::Response &resp)
+{
+  handleDynamicsStateChangeRequest(dynamicsInterface, DynamicsCmd::STOP, resp);
+  return true;
+}
+
+bool DeviceNodelet::dynamicsStopSlam(std_srvs::Trigger::Request &req,
+                                     std_srvs::Trigger::Response &resp)
+{
+  handleDynamicsStateChangeRequest(dynamicsInterface, DynamicsCmd::STOP_SLAM, resp);
+  return true;
+}
+
+bool DeviceNodelet::getSlamTrajectory(rc_visard_driver::GetTrajectory::Request &req,
+                                      rc_visard_driver::GetTrajectory::Response &resp)
+{
+  TrajectoryTime start(req.start_time.sec, req.start_time.nsec, req.start_time_relative);
+  TrajectoryTime end(req.end_time.sec, req.end_time.nsec, req.end_time_relative);
+
+  auto pbTraj = dynamicsInterface->getSlamTrajectory(start, end);
+  resp.trajectory.header.frame_id   = pbTraj.parent();
+  resp.trajectory.header.stamp.sec  = pbTraj.timestamp().sec();
+  resp.trajectory.header.stamp.nsec  = pbTraj.timestamp().nsec();
+
+  for (auto pbPose : pbTraj.poses())
   {
-    resp.success = false;
-    resp.message = "rcdynamics remote interface not yet initialized!";
+    geometry_msgs::PoseStamped rosPose;
+    rosPose.header.frame_id = pbTraj.parent();
+    rosPose.header.stamp.sec = pbPose.timestamp().sec();
+    rosPose.header.stamp.nsec = pbPose.timestamp().nsec();
+    rosPose.pose.position.x = pbPose.pose().position().x();
+    rosPose.pose.position.y = pbPose.pose().position().y();
+    rosPose.pose.position.z = pbPose.pose().position().z();
+    rosPose.pose.orientation.x = pbPose.pose().orientation().x();
+    rosPose.pose.orientation.y = pbPose.pose().orientation().y();
+    rosPose.pose.orientation.z = pbPose.pose().orientation().z();
+    rosPose.pose.orientation.w = pbPose.pose().orientation().w();
+    resp.trajectory.poses.push_back(rosPose);
   }
 
-  if (!resp.success) ROS_ERROR_STREAM(resp.message);
-}
+  // additionally publish extracted trajectory on topic
+  if (autopublishTrajectory)
+  {
+    trajPublisher.publish(resp.trajectory);
+  }
 
-bool DeviceNodelet::startDynamics(std_srvs::Trigger::Request &req,
-                                  std_srvs::Trigger::Response &resp){
-  handleDynamicsStateChangeRequest(dynamicsInterface, 1, resp);
   return true;
 }
 
-bool DeviceNodelet::restartDynamics(std_srvs::Trigger::Request &req,
-                                    std_srvs::Trigger::Response &resp){
-  handleDynamicsStateChangeRequest(dynamicsInterface, 2, resp);
-  return true;
-}
-
-bool DeviceNodelet::stopDynamics(std_srvs::Trigger::Request &req,
-                                 std_srvs::Trigger::Response &resp){
-  handleDynamicsStateChangeRequest(dynamicsInterface, 0, resp);
-  return true;
-}
 
 }
 
