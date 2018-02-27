@@ -1,0 +1,8 @@
+ros-indigo-rc-visard-description (2.0.0-0trusty) trusty; urgency=high
+
+  * rc_visard_description package added
+  * Contributors: florek
+
+ -- Monika Florek-Jasinska <monika.florek-jasinska@roboception.de>  Mon, 26 Feb 2018 23:00:00 -0000
+
+
