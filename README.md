@@ -1,3 +1,29 @@
+## rc_visard (lunar) - 2.0.0-0
+
+The packages in the `rc_visard` repository were released into the `lunar` distro by running `/home/flixr/.local/bin/bloom-release rc_visard --rosdistro lunar --track lunar --new-track` on `Tue, 27 Feb 2018 19:56:48 -0000`
+
+These packages were released:
+- `rc_visard`
+- `rc_visard_description`
+- `rc_visard_driver`
+
+Version of package(s) in repository `rc_visard`:
+
+- upstream repository: https://github.com/roboception/rc_visard_ros.git
+- release repository: unknown
+- rosdistro version: `null`
+- old version: `null`
+- new version: `2.0.0-0`
+
+Versions of tools used:
+
+- bloom version: `0.6.2`
+- catkin_pkg version: `0.4.1`
+- rosdep version: `0.12.1`
+- rosdistro version: `0.6.6`
+- vcstools version: `0.1.40`
+
+
 ## rc_visard (kinetic) - 2.0.0-0
 
 The packages in the `rc_visard` repository were released into the `kinetic` distro by running `/home/flixr/.local/bin/bloom-release rc_visard --rosdistro kinetic --track kinetic --new-track` on `Tue, 27 Feb 2018 19:49:57 -0000`
