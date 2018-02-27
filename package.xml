@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <package format="2">
   <name>rc_visard_driver</name>
-  <version>1.2.1</version>
+  <version>2.0.0</version>
   <description>
     The rc_visard_driver provides data from a Roboception rc_visard 3D sensor on several ROS topics.
   </description>
@@ -22,6 +22,10 @@
   <exec_depend>protobuf</exec_depend>
   <depend>curl</depend>
   <depend>rc_genicam_api</depend>
+  <depend version_gte="0.5">rc_dynamics_api</depend>
+
+  <build_depend>message_generation</build_depend>
+  <exec_depend>message_runtime</exec_depend>
 
   <buildtool_depend>catkin</buildtool_depend>
   <!-- depend is a shorthand for build_depend, build_export_depend and exec_depend -->
@@ -34,6 +38,8 @@
   <depend>dynamic_reconfigure</depend>
   <depend>geometry_msgs</depend>
   <depend>tf</depend>
+  <depend>visualization_msgs</depend>
+  <depend>nav_msgs</depend>
 
   <doc_depend>doxygen</doc_depend>
 
