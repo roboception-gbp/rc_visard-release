@@ -18,10 +18,15 @@ Configuration
 
 Parameters to be set to the ROS param server before run-time.
 
-- `device`: The ID of the device, i.e. Roboception rc_visard sensor. If the
-   provided GenTL library is used, then the ID is the MAC address of the
-   rc_visard, but with ':' replaced by '_'. This can be different if another
-   GenTL library is used.
+- `device`: The ID of the device, i.e. Roboception rc_visard sensor.
+   This can be either the
+   - lower case MAC address, but with ':' replaced by '_'.
+   - serial number
+   - user defined name (factory default: `rc_visard`), must be unique among all
+     reachable sensors
+   See https://github.com/roboception/rc_genicam_api#device-id for more details.
+   By default this parameter is set to `rc_visard`, which works with one
+   rc_visard with factory settings connected.
 
 - `gev_access`:  The gev_access mode, i.e.:
   - 'control'   Configuration and streaming with the possibility of other
@@ -39,8 +44,7 @@ Parameters to be set to the ROS param server before run-time.
   see `/dynamics_visualization_markers` topic. Default: false
 
 - `autostart_dynamics`: If true, the rc_visard's dynamics module is turned on
-  with this ROS node's start up. In this case, it is first tried to start SLAM.
-  If SLAM is not available, stereo INS without SLAM is started. Default: false
+  with this ROS node's start up. Default: false
 
 - `autostart_dynamics_with_slam`: If true, the rc_visard's dynamics module tries
   to turn on SLAM with this ROS node's start up.
@@ -56,6 +60,8 @@ Parameters to be set to the ROS param server before run-time.
 #### Dynamic-reconfigure Parameters
 
   These parameters can be changed during runtime via dynamic reconfigure:
+
+  - `ptp_enabled`: Enable PTP slave (PrecisionTimeProtocol, IEEE1588)
 
   - `camera_fps`: Frames per second that are published by this nodelet.
     Publishing frames will be slowed down depending on this setting. Setting
@@ -206,6 +212,7 @@ dynamic module (which needs to be started for working dynamic-state estimates).
 - `dynamics_start_slam`
 - `dynamics_restart_slam`
 - `dynamics_stop_slam`
+- `dynamics_reset_slam`
 
 The trajectory constructed and stored by the `rc_slam` node
 can be retrieved by
