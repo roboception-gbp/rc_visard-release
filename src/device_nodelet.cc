@@ -89,6 +89,7 @@ DeviceNodelet::DeviceNodelet()
   reconfig = 0;
   dev_supports_gain = false;
   dev_supports_wb = false;
+  iocontrol_avail = false;
   level = 0;
 
   stopImageThread = imageRequested = imageSuccess = false;
@@ -183,8 +184,13 @@ void DeviceNodelet::keepAliveAndRecoverFromFails()
   dynamicsRestartSlamService = pnh.advertiseService("dynamics_restart_slam", &DeviceNodelet::dynamicsRestartSlam, this);
   dynamicsStopService = pnh.advertiseService("dynamics_stop", &DeviceNodelet::dynamicsStop, this);
   dynamicsStopSlamService = pnh.advertiseService("dynamics_stop_slam", &DeviceNodelet::dynamicsStopSlam, this);
-  dynamicsResetSlamService = pnh.advertiseService("dynamics_reset_slam", &DeviceNodelet::dynamicsResetSlam, this);
-  getSlamTrajectoryService = pnh.advertiseService("get_trajectory", &DeviceNodelet::getSlamTrajectory, this);
+
+  dynamicsResetSlamService = pnh.advertiseService("slam_reset", &DeviceNodelet::dynamicsResetSlam, this);
+  getSlamTrajectoryService = pnh.advertiseService("slam_get_trajectory", &DeviceNodelet::getSlamTrajectory, this);
+  slamSaveMapService = pnh.advertiseService("slam_save_map", &DeviceNodelet::saveSlamMap, this);
+  slamLoadMapService = pnh.advertiseService("slam_load_map", &DeviceNodelet::loadSlamMap, this);
+  slamRemoveMapService = pnh.advertiseService("slam_remove_map", &DeviceNodelet::removeSlamMap, this);
+
   if (autopublishTrajectory)
   {
     trajPublisher = getNodeHandle().advertise<nav_msgs::Path>("trajectory", 10);
@@ -406,6 +412,35 @@ void DeviceNodelet::initConfiguration(const std::shared_ptr<GenApi::CNodeMapRef>
 
   cfg.ptp_enabled = rcg::getBoolean(nodemap, "GevIEEE1588", false);
 
+  // check if io-control is available and get values
+
+  try
+  {
+    // only deliver images with output (i.e. projector) turned off in exposure
+    // alternate mode
+
+    rcg::setEnum(nodemap, "AcquisitionAlternateFilter", "OnlyLow", true);
+
+    // get current values
+
+    rcg::setEnum(nodemap, "LineSelector", "Out1", true);
+    cfg.out1_mode = rcg::getString(nodemap, "LineSource", true);
+
+    rcg::setEnum(nodemap, "LineSelector", "Out2", true);
+    cfg.out2_mode = rcg::getString(nodemap, "LineSource", true);
+
+    iocontrol_avail = true;
+  }
+  catch (const std::exception &)
+  {
+    ROS_WARN("rc_visard_driver: IO control functions are not available.");
+
+    cfg.out1_mode = "ExposureActive";
+    cfg.out2_mode = "Low";
+
+    iocontrol_avail = false;
+  }
+
   // setup reconfigure server
 
   if (reconfig == 0)
@@ -430,6 +465,8 @@ void DeviceNodelet::initConfiguration(const std::shared_ptr<GenApi::CNodeMapRef>
     pnh.setParam("depth_maxdepth", cfg.depth_maxdepth);
     pnh.setParam("depth_maxdeptherr", cfg.depth_maxdeptherr);
     pnh.setParam("ptp_enabled", cfg.ptp_enabled);
+    pnh.setParam("out1_mode", cfg.out1_mode);
+    pnh.setParam("out2_mode", cfg.out2_mode);
 
     // TODO: we need to dismangle initialization of dynreconfserver from not-READONLY-access-condition
     reconfig = new dynamic_reconfigure::Server<rc_visard_driver::rc_visard_driverConfig>(pnh);
@@ -468,6 +505,26 @@ void DeviceNodelet::reconfigure(rc_visard_driver::rc_visard_driverConfig& c, uin
     c.depth_quality = "H";
   }
 
+  if (iocontrol_avail)
+  {
+    if (c.out1_mode != "Low" && c.out1_mode != "High" && c.out1_mode != "ExposureActive" &&
+        c.out1_mode != "ExposureAlternateActive")
+    {
+      c.out1_mode = "ExposureActive";
+    }
+
+    if (c.out2_mode != "Low" && c.out2_mode != "High" && c.out2_mode != "ExposureActive" &&
+        c.out2_mode != "ExposureAlternateActive")
+    {
+      c.out2_mode = "Low";
+    }
+  }
+  else
+  {
+    c.out1_mode = "ExposureActive";
+    c.out2_mode = "Low";
+  }
+
   // copy config for using it in the grabbing thread
 
   config = c;
@@ -483,7 +540,8 @@ namespace
 */
 
 void setConfiguration(const std::shared_ptr<GenApi::CNodeMapRef>& nodemap,
-                      const rc_visard_driver::rc_visard_driverConfig& cfg, uint32_t lvl)
+                      const rc_visard_driver::rc_visard_driverConfig& cfg, uint32_t lvl,
+                      bool iocontrol_avail)
 {
   uint32_t prev_lvl = 0;
 
@@ -637,6 +695,28 @@ void setConfiguration(const std::shared_ptr<GenApi::CNodeMapRef>& nodemap,
       {
         lvl &= ~131072;
         rcg::setBoolean(nodemap, "GevIEEE1588", cfg.ptp_enabled, true);
+      }
+
+      if (lvl & 262144)
+      {
+        lvl &= ~262144;
+
+        if (iocontrol_avail)
+        {
+          rcg::setEnum(nodemap, "LineSelector", "Out1", true);
+          rcg::setEnum(nodemap, "LineSource", cfg.out1_mode.c_str(), true);
+        }
+      }
+
+      if (lvl & 524288)
+      {
+        lvl &= ~524288;
+
+        if (iocontrol_avail)
+        {
+          rcg::setEnum(nodemap, "LineSelector", "Out2", true);
+          rcg::setEnum(nodemap, "LineSource", cfg.out2_mode.c_str(), true);
+        }
       }
     }
     catch (const std::exception& ex)
@@ -961,9 +1041,22 @@ void DeviceNodelet::grab(std::string device, rcg::Device::ACCESS access)
             level = 0;
             mtx.unlock();
 
-            setConfiguration(rcgnodemap, cfg, lvl);
+            setConfiguration(rcgnodemap, cfg, lvl, iocontrol_avail);
 
             disprange = cfg.depth_disprange;
+
+            if (lvl & (262144|524288))
+            {
+              if (cfg.out1_mode == "ExposureAlternateActive" ||
+                  cfg.out2_mode == "ExposureAlternateActive")
+              {
+                points2.setTimestampTolerance(0.05);
+              }
+              else
+              {
+                points2.setTimestampTolerance(0);
+              }
+            }
           }
         }
 
@@ -1150,6 +1243,91 @@ bool DeviceNodelet::getSlamTrajectory(rc_visard_driver::GetTrajectory::Request& 
 
   return true;
 }
+
+bool DeviceNodelet::saveSlamMap(std_srvs::Trigger::Request& req, std_srvs::Trigger::Response& resp)
+{
+  resp.success = false;
+
+  if (dynamicsInterface)
+  {
+    try
+    {
+      rcd::RemoteInterface::ReturnCode rc = dynamicsInterface->saveSlamMap();
+      resp.success = (rc.value >= 0);
+      resp.message = rc.message;
+    }
+    catch (std::exception& e)
+    {
+      resp.message = std::string("Failed to save SLAM map: ") + e.what();
+    }
+  }
+  else
+  {
+    resp.message = "rcdynamics remote interface not yet initialized!";
+  }
+
+  if (!resp.success)
+    ROS_ERROR_STREAM(resp.message);
+
+  return true;
+}
+
+bool DeviceNodelet::loadSlamMap(std_srvs::Trigger::Request& req, std_srvs::Trigger::Response& resp)
+{
+  resp.success = false;
+
+  if (dynamicsInterface)
+  {
+    try
+    {
+      rcd::RemoteInterface::ReturnCode rc = dynamicsInterface->loadSlamMap();
+      resp.success = (rc.value >= 0);
+      resp.message = rc.message;
+    }
+    catch (std::exception& e)
+    {
+      resp.message = std::string("Failed to load SLAM map: ") + e.what();
+    }
+  }
+  else
+  {
+    resp.message = "rcdynamics remote interface not yet initialized!";
+  }
+
+  if (!resp.success)
+    ROS_ERROR_STREAM(resp.message);
+
+  return true;
+}
+
+bool DeviceNodelet::removeSlamMap(std_srvs::Trigger::Request& req, std_srvs::Trigger::Response& resp)
+{
+  resp.success = false;
+
+  if (dynamicsInterface)
+  {
+    try
+    {
+      rcd::RemoteInterface::ReturnCode rc = dynamicsInterface->removeSlamMap();
+      resp.success = (rc.value >= 0);
+      resp.message = rc.message;
+    }
+    catch (std::exception& e)
+    {
+      resp.message = std::string("Failed to remove SLAM map: ") + e.what();
+    }
+  }
+  else
+  {
+    resp.message = "rcdynamics remote interface not yet initialized!";
+  }
+
+  if (!resp.success)
+    ROS_ERROR_STREAM(resp.message);
+
+  return true;
+}
+
 }
 
 PLUGINLIB_EXPORT_CLASS(rc::DeviceNodelet, nodelet::Nodelet)
