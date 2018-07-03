@@ -1,80 +1,246 @@
-# rc_visard
 
-ROS interface for the [Roboception rc_visard][] 3D sensor.
+rc_visard_driver
+----------------
 
-## rc_visard_driver
+This nodelet provides data from a Roboception rc_visard sensor on several ROS
+topics.
 
-Nodelet/node providing a ROS interface to configure the rc_visard and receive
-images/poses. The minimum ROS version for the driver is Indigo.
+Build/Installation
+------------------
+
+See the [main README](../README.md)
 
 
-### Build/Installation
+Configuration
+-------------
 
-This rc_visard_driver depends on
+#### Parameters
 
-* [rc_genicam_api](https://github.com/roboception/rc_genicam_api)
-* [rc_dynamics_api](https://github.com/roboception/rc_dynamics_api)
+Parameters to be set to the ROS param server before run-time.
 
-The dependencies can also be installed via rosdep.
+- `device`: The ID of the device, i.e. Roboception rc_visard sensor.
+   This can be either the
+   - lower case MAC address, but with ':' replaced by '_'.
+   - serial number
+   - user defined name (factory default: `rc_visard`), must be unique among all
+     reachable sensors
+   See https://github.com/roboception/rc_genicam_api#device-id for more details.
+   By default this parameter is set to `rc_visard`, which works with one
+   rc_visard with factory settings connected.
 
-    rosdep install --from-paths rc_visard_driver --ignore-src rc_visard_driver -r -y
+- `gev_access`:  The gev_access mode, i.e.:
+  - 'control'   Configuration and streaming with the possibility of other
+                clients to read GenICam parameters. This is the default.
+  - 'exclusive' Exclusive access to the sensor. This prevents other clients to
+                read GenICam parameters.
+  - 'off'       Switches gev access completely off. The node only streams pose
+                information if switched on.
 
-Building and installing the package follows the typical ROS catkin workflow.
+- `enable_tf`: If true then the node subscribes to the rc_visard's
+  dynamics-pose stream and publishes them on tf. Default: false
 
-As an alternative, the cmake build-flow would be something like
+- `enable_visualization_markers`: If true, additional visualization markers are
+  published that visualize the rc_visard's dynamics state (velocities and accelerations),
+  see `/dynamics_visualization_markers` topic. Default: false
 
-    mkdir build && cd build
-    cmake -DCATKIN_BUILD_BINARY_PACKAGE="1" -DCMAKE_INSTALL_PREFIX="/opt/ros/$ROS_DISTRO" -DCMAKE_PREFIX_PATH="/opt/ros/$ROS_DISTRO" -DCMAKE_BUILD_TYPE=Release ../rc_visard_driver
-    make
-    make install
+- `autostart_dynamics`: If true, the rc_visard's dynamics module is turned on
+  with this ROS node's start up. Default: false
 
-Alternatively, instead of the final `make install`, you can also use
-`make package` and `sudo dpkg -i install ros-indigo-rc-visard-driver_*.deb`.
+- `autostart_dynamics_with_slam`: If true, the rc_visard's dynamics module tries
+  to turn on SLAM with this ROS node's start up.
+  If SLAM is not available (no license) only a warning is printed. Default: false
 
-### GenICam GenTL Transport Layer
+- `autostop_dynamics`: If true, the rc_visard's dynamics module is turned off
+  when this ROS node shuts down. Default: false
 
-The rc_visard_driver uses [rc_genicam_api](https://github.com/roboception/rc_genicam_api)
-for interfacing with the rc_visard sensor via GenICam/GigE Vision and requires a
-transport layer called a GenTL producer (shared library with the suffix `.cti`).
-For convenience rc_genicam_api comes with producers from Baumer for common
-architectures.
+- `autopublish_trajectory`: If true, results of the `get_trajectory` service
+  calls are automatically published to `/trajectory` topic.
+  Default: false
 
-The path to the producer can be set with the `GENICAM_GENTL64_PATH`
-environment variable (or `GENICAM_GENTL32_PATH` for 32 bit systems).
-If not set, rc_visard_driver will fall back to searching for the Baumer
-producer where rc_genicam_api is installed.
+#### Dynamic-reconfigure Parameters
 
-If the producer .cti can't be found and you will get an error message like
+  These parameters can be changed during runtime via dynamic reconfigure:
 
-    [ERROR] [1512568083.512790905]: rc_visard_driver: No transport layers found in path /opt/ros/indigo/lib/rc_genicam_api
+  - `ptp_enabled`: Enable PTP slave (PrecisionTimeProtocol, IEEE1588)
 
-In this case you need either need to actually install rc_genicam_api properly or
-set the environment variable when running it. E.g. export:
+  - `camera_fps`: Frames per second that are published by this nodelet.
+    Publishing frames will be slowed down depending on this setting. Setting
+    it higher than the real framerate of the specific device has no effect.
 
-    GENICAM_GENTL64_PATH=/path/to/rc_genicam_api/baumer/Ubuntu-14.04/x86_64
+  - `camera_exp_auto`: If true, then the exposure time is chosen automatically,
+    up to exp_max as maximum. If false, then exp_value is used as exposure
+    time in seconds.
 
-### Configuration and usage
+  - `camera_exp_max`: Maximum exposure time in seconds if exp_auto is true.
 
-See the [rc_visard_driver README](rc_visard_driver/README.md) for more details.
+  - `camera_exp_value`: Exposure time in seconds if exp_auto is false.
 
-## rc_visard_description
+  - `camera_gain_value`: Gain factor in decibel if exp_auto is false.
 
-Package with xacro and urdf files for rc_visard_65 and rc_visard_160
+  - `depth_quality`: Quality can be `Low`, `Medium`, `High` and `StaticHigh`.
+    Only the first letter will be checked, thus specification of `L`, `M`,
+    `H` or `S` is sufficient.
 
-### Build/Installation
+    + `StaticHigh` quality means computation with 640x480 pixel, limited to 3 Hz
+      and accumulation input images. The scene must be static during image
+      accumulation! The timestamp of the disparity image is taken from the first
+      image that was used for accumulation.
+    + `High` quality means computation with 640x480 pixel.
+    + `Medium` quality means computation with 320x240 pixel.
+    + `Low` quality means computation with 214x160 pixel.
 
-Building and installing the package follows the typical ROS catkin workflow.
+    Default: `High`.
 
-### Configuration and usage
+  - `depth_disprange`: Disparity range in pixel, related to the downscaled
+    image at quality=H. The range is adapted to the quality.
 
-See the [rc_visard_description README](rc_visard_description/README.md) for more details.
+  - `depth_fill`: Higher numbers fill gaps with measurments with potentielly
+    higher errors.
 
-## Acknowledgements
+  - `depth_seg`: Maximum size of isolated disparity regions that will be
+    invalidated, related to full resolution.
 
-This FTP (Focused Technical Project) has received funding from the European Union’s Horizon 2020 research and innovation programme under the project ROSIN with the grant agreement No 732287.
+  - `depth_median`: Performs median filtering with the given window size.
 
-ROSIN: ROS-Industrial Quality-Assured Robot Software Components: http://rosin-project.eu
+  - `depth_minconf`: Minimal confidence. All disparities with lower confidence
+    will be set to invalid.
 
-![EU flag](rosin_eu_flag.jpg) ![ROSIN logo](rosin_ack_logo_wide.png)
+  - `depth_mindepth`: Minimum depth in meter. All disparities with lower depth
+    will be set to invalid.
 
-[Roboception rc_visard]: http://roboception.com/rc_visard
+  - `depth_maxdepth`: Maximum depth in meter. All disparities with higher depth
+    will be set to invalid.
+
+  - `depth_maxdeptherr`: Maximum depth error in meter. All disparities with a
+    higher depth error will be set to invalid.
+
+For color sensors, the following dynamic-reconfigure parameters are additionally
+available:
+
+  - `camera_wb_auto`: If true, then white balancing is done automatically. If
+    false, then the red and blue to green ratios can be chosen manually.
+
+  - `camera_wb_ratio_red`: Red to green ratio for color balancing if
+    `camera_wb_auto` is false.
+
+  - `camera_wb_ratio_blue`: Blue to green ratio for color balancing if
+    `camera_wb_auto` is false.
+
+Provided Topics
+---------------
+
+The following topics are provided. The nodelet tries to request only
+data (e.g., images, poses) from the sensor if there is subscriber
+to the corresponding topic.
+
+#### Images, Stereo Data, Point Clouds
+
+- /stereo/left/camera_info (sensor_msgs::CameraInfo)
+- /stereo/right/camera_info (sensor_msgs::CameraInfo)
+- /stereo/left/image_rect (sensor_msgs::Image, MONO8)
+- /stereo/right/image_rect (sensor_msgs::Image, MONO8)
+- /stereo/disparity (stereo_msgs::DisparityImage)
+- /stereo/disparity_color (sensor_msgs::Image, RGB8, visually pleasing)
+- /stereo/depth (sensor_msgs::Image, TYPE_32FC1)
+- /stereo/confidence (sensor_msgs::Image, TYPE_32FC1, values between 0 and 1)
+- /stereo/error_disparity (sensor_msgs::Image, TYPE_32FC1)
+- /stereo/error_depth (sensor_msgs::Image, TYPE_32FC1)
+- /stereo/points2 (sensor_msgs::PointCloud2)
+
+For color sensors, the following topics are additionally available:
+
+- /stereo/left/image_rect_color (sensor_msgs::Image, format: RGB8)
+- /stereo/right/image_rect_color (sensor_msgs::Image, format: RGB8)
+
+#### Dynamic State (i.e. poses, IMU data, etc.)
+
+These topics deliver the rc_visard's estimated dynamic state such as its
+position, orientation, and velocity. For these topics to work properly,
+the rc_visard's dynamics module must be turned on (see respective
+service calls or startup-parameters).
+
+- /pose (geometry_msgs/PoseStamped; same data as provided via tf if
+  `enable_tf` is set to true)
+- /pose_ins (geometry_msgs/PoseStamped)
+- /pose_rt (geometry_msgs/PoseStamped)
+- /pose_rt_ins (geometry_msgs/PoseStamped)
+- /dynamics (nav_msgs/Odometry)
+- /dynamics_ins (nav_msgs/Odometry)
+
+This topic delivers raw measurements from the on-board IMU sensor:
+- /imu (sensor_msgs/Imu)
+
+#### TF
+
+If the parameter `enable_tf` is set to true, the node subscribes to the
+rc_visard's pose stream (same data published on `/pose` topic) and publishes them on tf.
+
+
+Relevant Coordinate Frames
+--------------------------
+
+The following coordinate frames are relevant for interpreting the data
+provided by the rc_visard:
+
+- `camera`: The pupil's center of the rc_visard's left camera. All
+  stereo-camera data such as images and point clouds are given in this frame.
+- `world`: Relevant for navigation applications. The world frame’s origin is
+  located at the origin of the rc_visard’s IMU coordinate frame at the instant
+  when state estimation is switched on. Estimated poses of the rc_visard are
+  given in this frame, i.e. as the rc_visard moves in the world and state
+  estimation is running, the `camera` frame will change w.r.t. this frame.
+- `imu`: The IMU coordinate frame is inside the rc_visard’s housing. The raw
+  IMU measurements are given in this frame.
+
+#### Running multiple rc_visard's in one ros environment
+
+For operating multiple rc_visard's in one ros environment, each ros node must
+be started in separate namespaces, e.g., `my_visard`. As a result, all
+frame_ids in all ros messages will be prefixed, e.g., to `my_visard_world` or
+`my_visard_camera`.
+
+
+Services
+--------
+
+The following services are offered to start, stop, and restart the rc_visard's
+dynamic module (which needs to be started for working dynamic-state estimates).
+
+- `dynamics_start`
+- `dynamics_restart`
+- `dynamics_stop`
+- `dynamics_start_slam`
+- `dynamics_restart_slam`
+- `dynamics_stop_slam`
+
+The trajectory constructed and stored by the `rc_slam` node
+can be retrieved by
+- `slam_get_trajectory`
+
+The onboard map of the `rc_slam` node can be saved on the rc_visard for loading it
+after a SLAM restart or power cycle:
+- `slam_save_map`
+- `slam_load_map`
+- `slam_remove_map`
+
+The onboard `rc_slam` node can be "reset" (clears the internal state of the SLAM component,
+including the trajectory) to free the memory with
+- `slam_reset`
+
+
+Launching
+---------
+
+- Using command line parameters:
+
+      rosrun rc_visard_driver rc_visard_driver _device:=00_1e_06_32_03_40 _enable_tf:=True _autostart_dynamics:=True _autostop_dynamics:=True
+
+- As a nodelet, and in a separate **namespace**:
+
+      ROS_NAMESPACE=my_visard rosrun nodelet nodelet standalone rc_visard_driver _device:=00_1e_06_32_03_40
+
+  Note that in this setup all frame_ids in all ros messages (including
+  tf-messages) will be prefixed with `my_visard`, e.g., the frame_id of
+  the published camera images will be `my_visard_camera`, the frame_id
+  of the poses will be `my_visard_world`, and the frame_id of
+  the Imu messages will be `my_visard_imu`.
