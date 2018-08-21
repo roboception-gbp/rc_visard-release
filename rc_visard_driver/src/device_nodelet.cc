@@ -416,10 +416,9 @@ void DeviceNodelet::initConfiguration(const std::shared_ptr<GenApi::CNodeMapRef>
 
   try
   {
-    // only deliver images with output (i.e. projector) turned off in exposure
-    // alternate mode
+    // disable filtering images on the sensor
 
-    rcg::setEnum(nodemap, "AcquisitionAlternateFilter", "OnlyLow", true);
+    rcg::setEnum(nodemap, "AcquisitionAlternateFilter", "Off", false);
 
     // get current values
 
@@ -429,11 +428,22 @@ void DeviceNodelet::initConfiguration(const std::shared_ptr<GenApi::CNodeMapRef>
     rcg::setEnum(nodemap, "LineSelector", "Out2", true);
     cfg.out2_mode = rcg::getString(nodemap, "LineSource", true);
 
-    iocontrol_avail = true;
+    // check if license for IO control functions is available
+
+    iocontrol_avail = nodemap->_GetNode("LineSource")->GetAccessMode() == GenApi::RW;
+
+    if (!iocontrol_avail)
+    {
+      ROS_INFO("rc_visard_driver: License for iocontrol module not available, disabling out1_mode and out2_mode.");
+    }
+
+    // enabling chunk data for getting the live line status
+
+    rcg::setBoolean(nodemap, "ChunkModeActive", iocontrol_avail, false);
   }
-  catch (const std::exception &)
+  catch (const std::exception&)
   {
-    ROS_WARN("rc_visard_driver: IO control functions are not available.");
+    ROS_WARN("rc_visard_driver: rc_visard has an older firmware, IO control functions are not available.");
 
     cfg.out1_mode = "ExposureActive";
     cfg.out2_mode = "Low";
@@ -445,7 +455,30 @@ void DeviceNodelet::initConfiguration(const std::shared_ptr<GenApi::CNodeMapRef>
 
   if (reconfig == 0)
   {
-    // set ROS parameters according to current configuration
+    // try to get ROS parameters: if parameter is not set in parameter server, default to current sensor configuration
+
+    pnh.param("camera_fps", cfg.camera_fps, cfg.camera_fps);
+    pnh.param("camera_exp_auto", cfg.camera_exp_auto, cfg.camera_exp_auto);
+    pnh.param("camera_exp_value", cfg.camera_exp_value, cfg.camera_exp_value);
+    pnh.param("camera_gain_value", cfg.camera_gain_value, cfg.camera_gain_value);
+    pnh.param("camera_exp_max", cfg.camera_exp_max, cfg.camera_exp_max);
+    pnh.param("camera_wb_auto", cfg.camera_wb_auto, cfg.camera_wb_auto);
+    pnh.param("camera_wb_ratio_red", cfg.camera_wb_ratio_red, cfg.camera_wb_ratio_red);
+    pnh.param("camera_wb_ratio_blue", cfg.camera_wb_ratio_blue, cfg.camera_wb_ratio_blue);
+    pnh.param("depth_quality", cfg.depth_quality, cfg.depth_quality);
+    pnh.param("depth_disprange", cfg.depth_disprange, cfg.depth_disprange);
+    pnh.param("depth_seg", cfg.depth_seg, cfg.depth_seg);
+    pnh.param("depth_median", cfg.depth_median, cfg.depth_median);
+    pnh.param("depth_fill", cfg.depth_fill, cfg.depth_fill);
+    pnh.param("depth_minconf", cfg.depth_minconf, cfg.depth_minconf);
+    pnh.param("depth_mindepth", cfg.depth_mindepth, cfg.depth_mindepth);
+    pnh.param("depth_maxdepth", cfg.depth_maxdepth, cfg.depth_maxdepth);
+    pnh.param("depth_maxdeptherr", cfg.depth_maxdeptherr, cfg.depth_maxdeptherr);
+    pnh.param("ptp_enabled", cfg.ptp_enabled, cfg.ptp_enabled);
+    pnh.param("out1_mode", cfg.out1_mode, cfg.out1_mode);
+    pnh.param("out2_mode", cfg.out2_mode, cfg.out2_mode);
+
+    // set parameters on parameter server so that dynamic reconfigure picks them up
 
     pnh.setParam("camera_fps", cfg.camera_fps);
     pnh.setParam("camera_exp_auto", cfg.camera_exp_auto);
@@ -540,8 +573,7 @@ namespace
 */
 
 void setConfiguration(const std::shared_ptr<GenApi::CNodeMapRef>& nodemap,
-                      const rc_visard_driver::rc_visard_driverConfig& cfg, uint32_t lvl,
-                      bool iocontrol_avail)
+                      const rc_visard_driver::rc_visard_driverConfig& cfg, uint32_t lvl, bool iocontrol_avail)
 {
   uint32_t prev_lvl = 0;
 
@@ -744,6 +776,7 @@ void disableAll(const std::shared_ptr<GenApi::CNodeMapRef>& nodemap)
     rcg::setBoolean(nodemap, "ComponentEnable", false, true);
   }
 
+  rcg::setEnum(nodemap, "ComponentSelector", "Intensity");
   rcg::setEnum(nodemap, "PixelFormat", "Mono8");
 }
 
@@ -853,6 +886,15 @@ void DeviceNodelet::grab(std::string device, rcg::Device::ACCESS access)
 
       int disprange = config.depth_disprange;
 
+      // prepare chunk adapter for getting chunk data, if iocontrol is available
+
+      std::shared_ptr<GenApi::CChunkAdapter> chunkadapter;
+
+      if (iocontrol_avail)
+      {
+        chunkadapter = rcg::getChunkAdapter(rcgnodemap, rcgdev->getTLType());
+      }
+
       // initialize all publishers
 
       ros::NodeHandle nh(getNodeHandle(), "stereo");
@@ -861,8 +903,8 @@ void DeviceNodelet::grab(std::string device, rcg::Device::ACCESS access)
       CameraInfoPublisher lcaminfo(nh, tfPrefix, f, t, true);
       CameraInfoPublisher rcaminfo(nh, tfPrefix, f, t, false);
 
-      ImagePublisher limage(it, tfPrefix, true, false);
-      ImagePublisher rimage(it, tfPrefix, false, false);
+      ImagePublisher limage(it, tfPrefix, true, false, iocontrol_avail);
+      ImagePublisher rimage(it, tfPrefix, false, false, iocontrol_avail);
 
       DisparityPublisher disp(nh, tfPrefix, f, t, scale);
       DisparityColorPublisher cdisp(it, tfPrefix, scale);
@@ -876,19 +918,20 @@ void DeviceNodelet::grab(std::string device, rcg::Device::ACCESS access)
 
       // add color image publishers if the camera supports color
 
-      std::shared_ptr<GenICam2RosPublisher> limage_color;
-      std::shared_ptr<GenICam2RosPublisher> rimage_color;
+      std::shared_ptr<ImagePublisher> limage_color;
+      std::shared_ptr<ImagePublisher> rimage_color;
 
       {
         std::vector<std::string> format;
+        rcg::setEnum(rcgnodemap, "ComponentSelector", "Intensity", true);
         rcg::getEnum(rcgnodemap, "PixelFormat", format, true);
 
         for (size_t i = 0; i < format.size(); i++)
         {
           if (format[i] == "YCbCr411_8")
           {
-            limage_color = std::make_shared<ImagePublisher>(it, tfPrefix, true, true);
-            rimage_color = std::make_shared<ImagePublisher>(it, tfPrefix, false, true);
+            limage_color = std::make_shared<ImagePublisher>(it, tfPrefix, true, true, iocontrol_avail);
+            rimage_color = std::make_shared<ImagePublisher>(it, tfPrefix, false, true, iocontrol_avail);
             break;
           }
         }
@@ -924,6 +967,16 @@ void DeviceNodelet::grab(std::string device, rcg::Device::ACCESS access)
             cntConsecutiveFails = 0;
             imageSuccess = true;
 
+            // get out1 line status from chunk data if possible
+
+            bool out1 = false;
+            if (iocontrol_avail && chunkadapter && buffer->getContainsChunkdata())
+            {
+              chunkadapter->AttachBuffer(reinterpret_cast<std::uint8_t*>(buffer->getBase()), buffer->getSizeFilled());
+
+              out1 = (rcg::getInteger(rcgnodemap, "ChunkLineStatusAll", 0, 0, false) & 0x1);
+            }
+
             // the buffer is offered to all publishers
 
             disp.setDisprange(disprange);
@@ -934,13 +987,13 @@ void DeviceNodelet::grab(std::string device, rcg::Device::ACCESS access)
             lcaminfo.publish(buffer, pixelformat);
             rcaminfo.publish(buffer, pixelformat);
 
-            limage.publish(buffer, pixelformat);
-            rimage.publish(buffer, pixelformat);
+            limage.publish(buffer, pixelformat, out1);
+            rimage.publish(buffer, pixelformat, out1);
 
             if (limage_color && rimage_color)
             {
-              limage_color->publish(buffer, pixelformat);
-              rimage_color->publish(buffer, pixelformat);
+              limage_color->publish(buffer, pixelformat, out1);
+              rimage_color->publish(buffer, pixelformat, out1);
             }
 
             disp.publish(buffer, pixelformat);
@@ -951,7 +1004,7 @@ void DeviceNodelet::grab(std::string device, rcg::Device::ACCESS access)
             error_disp.publish(buffer, pixelformat);
             error_depth.publish(buffer, pixelformat);
 
-            points2.publish(buffer, pixelformat);
+            points2.publish(buffer, pixelformat, out1);
           }
           else if (buffer != 0 && buffer->getIsIncomplete())
           {
@@ -988,6 +1041,7 @@ void DeviceNodelet::grab(std::string device, rcg::Device::ACCESS access)
           {
             if (!ccolor)
             {
+              rcg::setEnum(rcgnodemap, "ComponentSelector", "Intensity", true);
               rcg::setEnum(rcgnodemap, "PixelFormat", "YCbCr411_8", true);
               ccolor = true;
             }
@@ -996,6 +1050,7 @@ void DeviceNodelet::grab(std::string device, rcg::Device::ACCESS access)
           {
             if (ccolor)
             {
+              rcg::setEnum(rcgnodemap, "ComponentSelector", "Intensity", true);
               rcg::setEnum(rcgnodemap, "PixelFormat", "Mono8", true);
               ccolor = false;
             }
@@ -1045,16 +1100,18 @@ void DeviceNodelet::grab(std::string device, rcg::Device::ACCESS access)
 
             disprange = cfg.depth_disprange;
 
-            if (lvl & (262144|524288))
+            if (lvl & 262144)
             {
-              if (cfg.out1_mode == "ExposureAlternateActive" ||
-                  cfg.out2_mode == "ExposureAlternateActive")
+              bool alternate = (cfg.out1_mode == "ExposureAlternateActive");
+
+              limage.setOut1Alternate(alternate);
+              rimage.setOut1Alternate(alternate);
+              points2.setOut1Alternate(alternate);
+
+              if (limage_color && rimage_color)
               {
-                points2.setTimestampTolerance(0.05);
-              }
-              else
-              {
-                points2.setTimestampTolerance(0);
+                limage_color->setOut1Alternate(alternate);
+                rimage_color->setOut1Alternate(alternate);
               }
             }
           }
@@ -1327,7 +1384,6 @@ bool DeviceNodelet::removeSlamMap(std_srvs::Trigger::Request& req, std_srvs::Tri
 
   return true;
 }
-
 }
 
 PLUGINLIB_EXPORT_CLASS(rc::DeviceNodelet, nodelet::Nodelet)
