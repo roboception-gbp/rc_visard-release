@@ -1,0 +1,46 @@
+ros-indigo-rc-visard (2.3.0-0trusty) trusty; urgency=high
+
+
+
+ -- Felix Ruess <felix.ruess@roboception.de>  Mon, 20 Aug 2018 22:00:00 -0000
+
+ros-indigo-rc-visard (2.2.0-0trusty) trusty; urgency=high
+
+
+
+ -- Felix Ruess <felix.ruess@roboception.de>  Mon, 02 Jul 2018 22:00:00 -0000
+
+ros-indigo-rc-visard (2.1.1-0trusty) trusty; urgency=high
+
+
+
+ -- Felix Ruess <felix.ruess@roboception.de>  Thu, 14 Jun 2018 22:00:00 -0000
+
+ros-indigo-rc-visard (2.1.0-0trusty) trusty; urgency=high
+
+
+
+ -- Felix Ruess <felix.ruess@roboception.de>  Sun, 22 Apr 2018 22:00:00 -0000
+
+ros-indigo-rc-visard (2.0.0-0trusty) trusty; urgency=high
+
+  * rc_visard_description package added
+  * Contributors: Felix Ruess, florek
+
+ -- Felix Ruess <felix.ruess@roboception.de>  Mon, 26 Feb 2018 23:00:00 -0000
+
+ros-indigo-rc-visard (1.2.1-0trusty) trusty; urgency=high
+
+
+
+ -- Heiko Hirschmueller <heiko.hirschmueller@roboception.de>  Sun, 25 Feb 2018 23:00:00 -0000
+
+ros-indigo-rc-visard (1.2.0-0trusty) trusty; urgency=high
+
+  * release 1.2.0
+  * add rc_visard meta package
+  * Contributors: Felix Ruess
+
+ -- Heiko Hirschmueller <heiko.hirschmueller@roboception.de>  Sat, 10 Feb 2018 23:00:00 -0000
+
+
