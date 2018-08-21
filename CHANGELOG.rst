@@ -2,6 +2,17 @@
 Changelog for package rc_visard_driver
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+2.3.0 (2018-08-21)
+------------------
+
+* read params from parameter server before falling back to current device params
+* New image topics ...out1_low and ...out1_high are offered if iocontrol module is available
+
+2.2.1 (2018-07-05)
+------------------
+
+* Changed to component intensity before changing pixel format for supporting color rc_visards with version >= 1.3.0
+
 2.2.0 (2018-07-03)
 ------------------
 
