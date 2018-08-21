@@ -1,0 +1,12 @@
+Source: ros-lunar-rc-visard-description
+Section: misc
+Priority: extra
+Maintainer: Monika Florek-Jasinska <monika.florek-jasinska@roboception.de>
+Build-Depends: debhelper (>= 9.0.0), ros-lunar-catkin, ros-lunar-roslaunch
+Homepage: http://wiki.ros.org/rc_visard_description
+Standards-Version: 3.9.2
+
+Package: ros-lunar-rc-visard-description
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, ros-lunar-xacro
+Description: Visualization package for rc_visard
