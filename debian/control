@@ -1,0 +1,12 @@
+Source: ros-indigo-rc-hand-eye-calibration-client
+Section: misc
+Priority: extra
+Maintainer: Felix Ruess <felix.ruess@roboception.de>
+Build-Depends: debhelper (>= 9.0.0), ros-indigo-catkin, ros-indigo-dynamic-reconfigure, ros-indigo-geometry-msgs, ros-indigo-message-generation, ros-indigo-message-runtime, ros-indigo-roscpp, ros-indigo-std-srvs
+Homepage: http://wiki.ros.org/rc_hand_eye_calibration_client
+Standards-Version: 3.9.2
+
+Package: ros-indigo-rc-hand-eye-calibration-client
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, ros-indigo-dynamic-reconfigure, ros-indigo-geometry-msgs, ros-indigo-message-generation, ros-indigo-message-runtime, ros-indigo-roscpp, ros-indigo-std-srvs
+Description: The rc_hand_eye_calibration_client package
