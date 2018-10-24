@@ -1,0 +1,7 @@
+ros-lunar-rc-hand-eye-calibration-client (2.4.0-0xenial) xenial; urgency=high
+
+  * first release
+
+ -- Felix Ruess <felix.ruess@roboception.de>  Mon, 15 Oct 2018 22:00:00 -0000
+
+
