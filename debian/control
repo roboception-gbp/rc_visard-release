@@ -1,0 +1,12 @@
+Source: ros-lunar-rc-hand-eye-calibration-client
+Section: misc
+Priority: extra
+Maintainer: Felix Ruess <felix.ruess@roboception.de>
+Build-Depends: debhelper (>= 9.0.0), ros-lunar-catkin, ros-lunar-dynamic-reconfigure, ros-lunar-geometry-msgs, ros-lunar-message-generation, ros-lunar-message-runtime, ros-lunar-roscpp, ros-lunar-std-srvs
+Homepage: http://wiki.ros.org/rc_hand_eye_calibration_client
+Standards-Version: 3.9.2
+
+Package: ros-lunar-rc-hand-eye-calibration-client
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, ros-lunar-dynamic-reconfigure, ros-lunar-geometry-msgs, ros-lunar-message-generation, ros-lunar-message-runtime, ros-lunar-roscpp, ros-lunar-std-srvs
+Description: The rc_hand_eye_calibration_client package
