@@ -64,6 +64,8 @@ namespace rc
 {
 namespace rcd = dynamics;
 
+#define ROS_HAS_STEADYTIME (ROS_VERSION_MINIMUM(1, 13, 1) || ((ROS_VERSION_MINOR == 12) && ROS_VERSION_PATCH >= 8))
+
 ThreadedStream::Ptr DeviceNodelet::CreateDynamicsStreamOfType(rcd::RemoteInterface::Ptr rcdIface,
                                                               const std::string& stream, ros::NodeHandle& nh,
                                                               const std::string& frame_id_prefix, bool tfEnabled)
@@ -89,6 +91,8 @@ DeviceNodelet::DeviceNodelet()
   reconfig = 0;
   dev_supports_gain = false;
   dev_supports_wb = false;
+  dev_supports_depth_acquisition_trigger = false;
+  perform_depth_acquisition_trigger = false;
   iocontrol_avail = false;
   level = 0;
 
@@ -175,6 +179,10 @@ void DeviceNodelet::keepAliveAndRecoverFromFails()
     ROS_FATAL_STREAM("rc_visard_driver: Access must be 'control', 'exclusive' or 'off': " << access);
     return;
   }
+
+  // setup service for depth acquisition trigger
+
+  depthAcquisitionTriggerService = pnh.advertiseService("depth_acquisition_trigger", &DeviceNodelet::depthAcquisitionTrigger, this);
 
   // setup services for starting and stopping rcdynamics module
 
@@ -398,8 +406,22 @@ void DeviceNodelet::initConfiguration(const std::shared_ptr<GenApi::CNodeMapRef>
 
   // get current depth image configuration
 
+  v = rcg::getEnum(nodemap, "DepthAcquisitionMode", false);
+  if (v.size() > 0)
+  {
+    dev_supports_depth_acquisition_trigger = true;
+    cfg.depth_acquisition_mode = v;
+  }
+  else
+  {
+    ROS_WARN("rc_visard_driver: Device does not support triggering depth images. depth_acquisition_mode is without function.");
+
+    dev_supports_depth_acquisition_trigger = false;
+    cfg.depth_acquisition_mode = "Continuous";
+  }
+
   v = rcg::getEnum(nodemap, "DepthQuality", true);
-  cfg.depth_quality = v.substr(0, 1);
+  cfg.depth_quality = v;
 
   cfg.depth_disprange = rcg::getInteger(nodemap, "DepthDispRange", 0, 0, true);
   cfg.depth_seg = rcg::getInteger(nodemap, "DepthSeg", 0, 0, true);
@@ -465,6 +487,7 @@ void DeviceNodelet::initConfiguration(const std::shared_ptr<GenApi::CNodeMapRef>
     pnh.param("camera_wb_auto", cfg.camera_wb_auto, cfg.camera_wb_auto);
     pnh.param("camera_wb_ratio_red", cfg.camera_wb_ratio_red, cfg.camera_wb_ratio_red);
     pnh.param("camera_wb_ratio_blue", cfg.camera_wb_ratio_blue, cfg.camera_wb_ratio_blue);
+    pnh.param("depth_acquisition_mode", cfg.depth_acquisition_mode, cfg.depth_acquisition_mode);
     pnh.param("depth_quality", cfg.depth_quality, cfg.depth_quality);
     pnh.param("depth_disprange", cfg.depth_disprange, cfg.depth_disprange);
     pnh.param("depth_seg", cfg.depth_seg, cfg.depth_seg);
@@ -488,6 +511,7 @@ void DeviceNodelet::initConfiguration(const std::shared_ptr<GenApi::CNodeMapRef>
     pnh.setParam("camera_wb_auto", cfg.camera_wb_auto);
     pnh.setParam("camera_wb_ratio_red", cfg.camera_wb_ratio_red);
     pnh.setParam("camera_wb_ratio_blue", cfg.camera_wb_ratio_blue);
+    pnh.setParam("depth_acquisition_mode", cfg.depth_acquisition_mode);
     pnh.setParam("depth_quality", cfg.depth_quality);
     pnh.setParam("depth_disprange", cfg.depth_disprange);
     pnh.setParam("depth_seg", cfg.depth_seg);
@@ -511,7 +535,7 @@ void DeviceNodelet::initConfiguration(const std::shared_ptr<GenApi::CNodeMapRef>
 
 void DeviceNodelet::reconfigure(rc_visard_driver::rc_visard_driverConfig& c, uint32_t l)
 {
-  mtx.lock();
+  std::lock_guard<std::mutex> lock(mtx);
 
   // check and correct parameters
 
@@ -531,11 +555,40 @@ void DeviceNodelet::reconfigure(rc_visard_driver::rc_visard_driverConfig& c, uin
     l &= ~(16384 | 32768 | 65536);
   }
 
-  c.depth_quality = c.depth_quality.substr(0, 1);
-
-  if (c.depth_quality[0] != 'L' && c.depth_quality[0] != 'M' && c.depth_quality[0] != 'H' && c.depth_quality[0] != 'S')
+  if (dev_supports_depth_acquisition_trigger)
   {
-    c.depth_quality = "H";
+    c.depth_acquisition_mode = c.depth_acquisition_mode.substr(0, 1);
+
+    if (c.depth_acquisition_mode[0] == 'S')
+    {
+      c.depth_acquisition_mode = "SingleFrame";
+    }
+    else
+    {
+      c.depth_acquisition_mode = "Continuous";
+    }
+  }
+  else
+  {
+    c.depth_acquisition_mode = "Continuous";
+    l &= ~1048576;
+  }
+
+  if (c.depth_quality[0] == 'L')
+  {
+    c.depth_quality = "Low";
+  }
+  else if (c.depth_quality[0] == 'M')
+  {
+    c.depth_quality = "Medium";
+  }
+  else if (c.depth_quality[0] == 'S')
+  {
+    c.depth_quality = "StaticHigh";
+  }
+  else
+  {
+    c.depth_quality = "High";
   }
 
   if (iocontrol_avail)
@@ -562,8 +615,6 @@ void DeviceNodelet::reconfigure(rc_visard_driver::rc_visard_driverConfig& c, uin
 
   config = c;
   level |= l;
-
-  mtx.unlock();
 }
 
 namespace
@@ -651,6 +702,28 @@ void setConfiguration(const std::shared_ptr<GenApi::CNodeMapRef>& nodemap,
         lvl &= ~65536;
         rcg::setEnum(nodemap, "BalanceRatioSelector", "Blue", true);
         rcg::setFloat(nodemap, "BalanceRatio", cfg.camera_wb_ratio_blue, true);
+      }
+
+      if (lvl & 1048576)
+      {
+        lvl &= ~1048576;
+
+        std::vector<std::string> list;
+        rcg::getEnum(nodemap, "DepthAcquisitionMode", list, true);
+
+        std::string val;
+        for (size_t i = 0; i < list.size(); i++)
+        {
+          if (list[i].compare(0, 1, cfg.depth_acquisition_mode, 0, 1) == 0)
+          {
+            val = list[i];
+          }
+        }
+
+        if (val.size() > 0)
+        {
+          rcg::setEnum(nodemap, "DepthAcquisitionMode", val.c_str(), true);
+        }
       }
 
       if (lvl & 16)
@@ -885,6 +958,7 @@ void DeviceNodelet::grab(std::string device, rcg::Device::ACCESS access)
       initConfiguration(rcgnodemap, config, access);
 
       int disprange = config.depth_disprange;
+      bool is_depth_acquisition_continuous = (config.depth_acquisition_mode[0] == 'C');
 
       // prepare chunk adapter for getting chunk data, if iocontrol is available
 
@@ -950,86 +1024,117 @@ void DeviceNodelet::grab(std::string device, rcg::Device::ACCESS access)
                         << rcg::getString(rcgnodemap, "GevSCPSPacketSize") << ")");
 
         // enter grabbing loop
-
-        int missing = 0;
-        ros::Time tlastimage = ros::Time::now();
+#if ROS_HAS_STEADYTIME
+        ros::SteadyTime tlastimage = ros::SteadyTime::now();
+#else
+        ros::WallTime tlastimage = ros::WallTime::now();
+#endif
 
         while (!stopImageThread)
         {
-          const rcg::Buffer* buffer = stream[0]->grab(500);
+          const rcg::Buffer* buffer = stream[0]->grab(40);
 
-          if (buffer != 0 && !buffer->getIsIncomplete() && buffer->getImagePresent())
+          if (buffer != 0 && !buffer->getIsIncomplete())
           {
-            // reset counter of consecutive missing images and failures
-
-            missing = 0;
-            tlastimage = ros::Time::now();
-            cntConsecutiveFails = 0;
-            imageSuccess = true;
-
             // get out1 line status from chunk data if possible
 
             bool out1 = false;
             if (iocontrol_avail && chunkadapter && buffer->getContainsChunkdata())
             {
-              chunkadapter->AttachBuffer(reinterpret_cast<std::uint8_t*>(buffer->getBase()), buffer->getSizeFilled());
-
+              chunkadapter->AttachBuffer(reinterpret_cast<std::uint8_t*>(buffer->getGlobalBase()),
+                                                                         buffer->getSizeFilled());
               out1 = (rcg::getInteger(rcgnodemap, "ChunkLineStatusAll", 0, 0, false) & 0x1);
             }
 
-            // the buffer is offered to all publishers
-
-            disp.setDisprange(disprange);
-            cdisp.setDisprange(disprange);
-
-            uint64_t pixelformat = buffer->getPixelFormat();
-
-            lcaminfo.publish(buffer, pixelformat);
-            rcaminfo.publish(buffer, pixelformat);
-
-            limage.publish(buffer, pixelformat, out1);
-            rimage.publish(buffer, pixelformat, out1);
-
-            if (limage_color && rimage_color)
+            uint32_t npart=buffer->getNumberOfParts();
+            for (uint32_t part=0; part<npart; part++)
             {
-              limage_color->publish(buffer, pixelformat, out1);
-              rimage_color->publish(buffer, pixelformat, out1);
+              if (buffer->getImagePresent(part))
+              {
+                // reset counter of consecutive missing images and failures
+#if ROS_HAS_STEADYTIME
+                tlastimage = ros::SteadyTime::now();
+#else
+                tlastimage = ros::WallTime::now();
+#endif
+                cntConsecutiveFails = 0;
+                imageSuccess = true;
+
+                // the buffer is offered to all publishers
+
+                disp.setDisprange(disprange);
+                cdisp.setDisprange(disprange);
+
+                uint64_t pixelformat = buffer->getPixelFormat(part);
+
+                lcaminfo.publish(buffer, part, pixelformat);
+                rcaminfo.publish(buffer, part, pixelformat);
+
+                limage.publish(buffer, part, pixelformat, out1);
+                rimage.publish(buffer, part, pixelformat, out1);
+
+                if (limage_color && rimage_color)
+                {
+                  limage_color->publish(buffer, part, pixelformat, out1);
+                  rimage_color->publish(buffer, part, pixelformat, out1);
+                }
+
+                disp.publish(buffer, part, pixelformat);
+                cdisp.publish(buffer, part, pixelformat);
+                depth.publish(buffer, part, pixelformat);
+
+                confidence.publish(buffer, part, pixelformat);
+                error_disp.publish(buffer, part, pixelformat);
+                error_depth.publish(buffer, part, pixelformat);
+
+                points2.publish(buffer, part, pixelformat, out1);
+              }
             }
 
-            disp.publish(buffer, pixelformat);
-            cdisp.publish(buffer, pixelformat);
-            depth.publish(buffer, pixelformat);
+            // detach buffer from nodemap
 
-            confidence.publish(buffer, pixelformat);
-            error_disp.publish(buffer, pixelformat);
-            error_depth.publish(buffer, pixelformat);
-
-            points2.publish(buffer, pixelformat, out1);
+            if (chunkadapter) chunkadapter->DetachBuffer();
           }
           else if (buffer != 0 && buffer->getIsIncomplete())
           {
-            missing = 0;
+#if ROS_HAS_STEADYTIME
+            tlastimage = ros::SteadyTime::now();
+#else
+            tlastimage = ros::WallTime::now();
+#endif
             ROS_WARN("rc_visard_driver: Received incomplete image buffer");
           }
           else if (buffer == 0)
           {
-            // throw an expection if components are enabled and there is no
-            // data for 6*0.5 seconds
+            // throw an expection if data from enabled components is expected,
+            // but not comming for more than 3 seconds
 
-            if (cintensity || cintensitycombined || cdisparity || cconfidence || cerror)
+            if (cintensity || cintensitycombined ||
+                (is_depth_acquisition_continuous && (cdisparity || cconfidence || cerror)))
             {
-              missing++;
-              if (missing >= 6)  // report error
+#if ROS_HAS_STEADYTIME
+              double t = (ros::SteadyTime::now() - tlastimage).toSec();
+#else
+              double t = (ros::WallTime::now() - tlastimage).toSec();
+#endif
+
+              if (t > 3)  // report error
               {
                 std::ostringstream out;
 
-                out << "No images received for ";
-                out << (ros::Time::now() - tlastimage).toSec();
-                out << " seconds!";
+                out << "No images received for " << t << " seconds!";
 
                 throw std::underflow_error(out.str());
               }
             }
+          }
+
+          // trigger depth
+
+          if (dev_supports_depth_acquisition_trigger && perform_depth_acquisition_trigger)
+          {
+            perform_depth_acquisition_trigger = false;
+            rcg::callCommand(rcgnodemap, "DepthAcquisitionTrigger", true);
           }
 
           // determine what should be streamed, according to subscriptions to
@@ -1100,6 +1205,8 @@ void DeviceNodelet::grab(std::string device, rcg::Device::ACCESS access)
 
             disprange = cfg.depth_disprange;
 
+            // if in alternate mode, then make publishers aware of it
+
             if (lvl & 262144)
             {
               bool alternate = (cfg.out1_mode == "ExposureAlternateActive");
@@ -1112,6 +1219,24 @@ void DeviceNodelet::grab(std::string device, rcg::Device::ACCESS access)
               {
                 limage_color->setOut1Alternate(alternate);
                 rimage_color->setOut1Alternate(alternate);
+              }
+            }
+
+            // if depth acquisition changed to continuous mode, reset last
+            // grabbing time to avoid triggering timout if only disparity,
+            // confidence and/or error components are enabled
+
+            is_depth_acquisition_continuous = (cfg.depth_acquisition_mode[0] == 'C');
+
+            if (lvl & 1048576)
+            {
+              if (is_depth_acquisition_continuous)
+              {
+#if ROS_HAS_STEADYTIME
+                tlastimage = ros::SteadyTime::now();
+#else
+                tlastimage = ros::WallTime::now();
+#endif
               }
             }
           }
@@ -1144,6 +1269,17 @@ void DeviceNodelet::grab(std::string device, rcg::Device::ACCESS access)
     ROS_ERROR_STREAM("rc_visard_driver: Image grabbing failed.");
     recoveryRequested = true;
   }
+}
+
+bool DeviceNodelet::depthAcquisitionTrigger(std_srvs::Trigger::Request& req,
+                                            std_srvs::Trigger::Response& resp)
+{
+  perform_depth_acquisition_trigger = true;
+
+  resp.success = true;
+  resp.message = "";
+
+  return true;
 }
 
 // Anonymous namespace for local linkage

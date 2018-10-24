@@ -59,7 +59,7 @@ bool DisparityColorPublisher::used()
   return pub.getNumSubscribers() > 0;
 }
 
-void DisparityColorPublisher::publish(const rcg::Buffer* buffer, uint64_t pixelformat)
+void DisparityColorPublisher::publish(const rcg::Buffer* buffer, uint32_t part, uint64_t pixelformat)
 {
   if (pub.getNumSubscribers() > 0 && pixelformat == Coord3D_C16)
   {
@@ -77,14 +77,14 @@ void DisparityColorPublisher::publish(const rcg::Buffer* buffer, uint64_t pixelf
 
     // set image size
 
-    im->width = static_cast<uint32_t>(buffer->getWidth());
-    im->height = static_cast<uint32_t>(buffer->getHeight());
+    im->width = static_cast<uint32_t>(buffer->getWidth(part));
+    im->height = static_cast<uint32_t>(buffer->getHeight(part));
     im->is_bigendian = rcg::isHostBigEndian();
 
     // get pointer to image data in buffer
 
-    size_t px = buffer->getXPadding();
-    const uint8_t* ps = static_cast<const uint8_t*>(buffer->getBase()) + buffer->getImageOffset();
+    size_t px = buffer->getXPadding(part);
+    const uint8_t* ps = static_cast<const uint8_t*>(buffer->getBase(part));
 
     // ensure that current disprange setting is sufficient
 
@@ -102,8 +102,8 @@ void DisparityColorPublisher::publish(const rcg::Buffer* buffer, uint64_t pixelf
         {
           for (uint32_t i = 0; i < im->width; i++)
           {
-            dmax = std::max(dmax, static_cast<int>(p[0] << 8) | p[1]);
-            p++;
+            dmax = std::max(dmax, (static_cast<int>(p[0]) << 8) | p[1]);
+            p+=2;
           }
         }
       }
@@ -113,8 +113,8 @@ void DisparityColorPublisher::publish(const rcg::Buffer* buffer, uint64_t pixelf
         {
           for (uint32_t i = 0; i < im->width; i++)
           {
-            dmax = std::max(dmax, static_cast<int>(p[1] << 8) | p[0]);
-            p++;
+            dmax = std::max(dmax, (static_cast<int>(p[1]) << 8) | p[0]);
+            p+=2;
           }
         }
       }
