@@ -1,60 +1,89 @@
-ROS Hand-eye calibration client for Roboception's rc_visard
-=========================================================
+# rc_visard
 
-This node provides ROS service calls and topics to calibrate the rc_visard to a robot (aka hand-eye calibration). The calibration routine consists of several steps:
+ROS interface for the [Roboception rc_visard][] 3D sensor.
 
-1. Setting calibration parameters, i.e. grid size and mounting, via dynamic reconfigure.
-0. For a user-defined number of robot calibration poses repeat
-    
-    1. Move the robot to the pose (calibration grid must be visible in the rc_visard's view).
-    0. Send the robot pose to rc_visard (`set_pose`)
+Please also consult the manual for more details: https://doc.rc-visard.com
 
-0. Trigger the calibration tranformation to be calculated (`calibrate`).
+## rc_visard_driver
 
-After the calibration transform is calculated and tested, it should be saved to the rc_visard (`save_calibration`).
-
-For detailed instructions on the calibration routine consult the rc_visard manual: https://doc.rc-visard.com.
+Nodelet/node providing a ROS interface to configure the rc_visard and receive
+images/poses. The minimum ROS version for the driver is Indigo.
 
 
-Installation
-------------
+### Build/Installation
 
-This package relies on git submodules for the cpr library which need to be initialized before building from source.
-~~~
-git submodule update --init --recursive
-~~~
+This rc_visard_driver depends on
 
-Configuration
--------------
+* [rc_genicam_api](https://github.com/roboception/rc_genicam_api)
+* [rc_dynamics_api](https://github.com/roboception/rc_dynamics_api)
 
-### Parameters
+The dependencies can also be installed via rosdep.
 
-* `ip`: The IP address of the rc_visard that should be calibrated
+    rosdep install --from-paths rc_visard_driver --ignore-src rc_visard_driver -r -y
 
-### Dynamic reconfigure parameters
+Building and installing the package follows the typical ROS catkin workflow.
 
-* `grid_width`: The width of the calibration pattern in meters
-* `grid_height`: The height of the calibration pattern in meters
-* `robot_mounted` Whether the camera is mounted on the robot or not
+As an alternative, the cmake build-flow would be something like
 
-Services
---------
+    mkdir build && cd build
+    cmake -DCATKIN_BUILD_BINARY_PACKAGE="1" -DCMAKE_INSTALL_PREFIX="/opt/ros/$ROS_DISTRO" -DCMAKE_PREFIX_PATH="/opt/ros/$ROS_DISTRO" -DCMAKE_BUILD_TYPE=Release ../rc_visard_driver
+    make
+    make install
 
-The following services are offered to follow the calibration routine:
+Alternatively, instead of the final `make install`, you can also use
+`make package` and `sudo dpkg -i install ros-indigo-rc-visard-driver_*.deb`.
 
-* `reset_calibration`: Deletes all previously provided poses and corresponding images. The last saved calibration result is reloaded. This service might be used to (re-)start the hand-eye calibration from scratch.
-* `set_pose`: Provides a robot pose as calibration pose to the hand-eye calibration routine.
-* `calibrate`: Calculates and returns the hand-eye calibration transformation with the robot poses configured by the `set_pose` service.
-* `get_calibration`
-* `save_calibration`: Persistently saves the result of hand-eye calibration to the rc_visard and overwrites the existing one. The stored result can be retrieved any time by the get_calibration service.
-* `remove_calibration`: Removes the stored hand-eye calibration on the rc_visard. After this call the `get_calibration` service reports again that no hand-eye calibration is available.
+### GenICam GenTL Transport Layer
+
+The rc_visard_driver uses [rc_genicam_api](https://github.com/roboception/rc_genicam_api)
+for interfacing with the rc_visard sensor via GenICam/GigE Vision and requires a
+transport layer called a GenTL producer (shared library with the suffix `.cti`).
+For convenience rc_genicam_api comes with producers from Baumer for common
+architectures.
+
+The path to the producer can be set with the `GENICAM_GENTL64_PATH`
+environment variable (or `GENICAM_GENTL32_PATH` for 32 bit systems).
+If not set, rc_visard_driver will fall back to searching for the Baumer
+producer where rc_genicam_api is installed.
+
+If the producer .cti can't be found and you will get an error message like
+
+    [ERROR] [1512568083.512790905]: rc_visard_driver: No transport layers found in path /opt/ros/indigo/lib/rc_genicam_api
+
+In this case you need either need to actually install rc_genicam_api properly or
+set the environment variable when running it. E.g. export:
+
+    GENICAM_GENTL64_PATH=/path/to/rc_genicam_api/baumer/Ubuntu-14.04/x86_64
+
+### Configuration and usage
+
+See the [rc_visard_driver README](rc_visard_driver/README.md) for more details.
+
+## rc_visard_description
+
+Package with xacro and urdf files for rc_visard_65 and rc_visard_160
+
+### Build/Installation
+
+Building and installing the package follows the typical ROS catkin workflow.
+
+### Configuration and usage
+
+See the [rc_visard_description README](rc_visard_description/README.md) for more details.
+
+## rc_hand_eye_calibration_client
+
+Package for calibrating the rc_visard to a robot.
+See the [rc_hand_eye_calibration_client README](rc_hand_eye_calibration_client/README.md) for more details.
 
 
-Launching
----------
 
-Using command line parameters:
+## Acknowledgements
 
-~~~
-rosrun rc_hand_eye_calibration_client rc_hand_eye_calibration_client_node _ip:="10.0.2.44"
-~~~
+This FTP (Focused Technical Project) has received funding from the European Union’s Horizon 2020 research and innovation programme under the project ROSIN with the grant agreement No 732287.
+
+ROSIN: ROS-Industrial Quality-Assured Robot Software Components: http://rosin-project.eu
+
+![EU flag](rosin_eu_flag.jpg) ![ROSIN logo](rosin_ack_logo_wide.png)
+
+[Roboception rc_visard]: http://roboception.com/rc_visard
