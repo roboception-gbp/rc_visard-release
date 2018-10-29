@@ -63,8 +63,8 @@ tracks:
     - git-bloom-generate -y rosrpm --prefix release/:{ros_distro} :{ros_distro} -i
       :{release_inc}
     devel_branch: null
-    last_release: v2.4.0
-    last_version: 2.4.0
+    last_release: v2.4.2
+    last_version: 2.4.2
     name: rc_visard
     patches: null
     release_inc: '0'
