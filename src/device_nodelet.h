@@ -52,6 +52,8 @@
 
 #include <rc_visard_driver/GetTrajectory.h>
 
+#include <diagnostic_updater/diagnostic_updater.h>
+
 namespace rc
 {
 class DeviceNodelet : public nodelet::Nodelet
@@ -100,6 +102,7 @@ public:
   ///@return always true, check resp.success for wheter map could be removed
   bool removeSlamMap(std_srvs::Trigger::Request& req, std_srvs::Trigger::Response& resp);
 
+
 private:
   static ThreadedStream::Ptr CreateDynamicsStreamOfType(rc::dynamics::RemoteInterface::Ptr rcdIface,
                                                         const std::string& stream, ros::NodeHandle& nh,
@@ -114,6 +117,10 @@ private:
 
   void keepAliveAndRecoverFromFails();
 
+  void produce_connection_diagnostics(diagnostic_updater::DiagnosticStatusWrapper &stat);
+  void produce_device_diagnostics(diagnostic_updater::DiagnosticStatusWrapper &stat);
+
+
   dynamic_reconfigure::Server<rc_visard_driver::rc_visard_driverConfig>* reconfig;
 
   bool dev_supports_gain;
@@ -126,6 +133,7 @@ private:
   std::shared_ptr<GenApi::CNodeMapRef> rcgnodemap;
 
   std::mutex mtx;
+  bool stereo_plus_avail;
   bool iocontrol_avail;
   rc_visard_driver::rc_visard_driverConfig config;
   std::atomic_uint_least32_t level;
@@ -137,6 +145,7 @@ private:
   std::atomic_bool stopRecoverThread;
   bool recoveryRequested;
   int cntConsecutiveRecoveryFails;
+  int maxNumRecoveryTrials;
 
   ThreadedStream::Manager::Ptr dynamicsStreams;
 
@@ -162,6 +171,11 @@ private:
 
   /// should poses published also via tf?
   bool tfEnabled;
+
+  /// diagnostics publishing
+  diagnostic_updater::Updater updater;
+  std::string dev_serialno, dev_macaddr, dev_ipaddr, dev_version, gev_userid, gev_packet_size;
+  unsigned int totalIncompleteBuffers, totalImageReceiveTimeouts, totalConnectionLosses;
 };
 }
 
