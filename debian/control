@@ -1,0 +1,12 @@
+Source: ros-kinetic-rc-visard
+Section: misc
+Priority: extra
+Maintainer: Felix Ruess <felix.ruess@roboception.de>
+Build-Depends: debhelper (>= 9.0.0), ros-kinetic-catkin
+Homepage: http://roboception.com/rc_visard
+Standards-Version: 3.9.2
+
+Package: ros-kinetic-rc-visard
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, ros-kinetic-rc-hand-eye-calibration-client, ros-kinetic-rc-visard-description, ros-kinetic-rc-visard-driver
+Description: Roboception rc_visard support meta package
