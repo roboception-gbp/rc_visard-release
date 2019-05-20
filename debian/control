@@ -1,0 +1,12 @@
+Source: ros-kinetic-rc-hand-eye-calibration-client
+Section: misc
+Priority: extra
+Maintainer: Felix Ruess <felix.ruess@roboception.de>
+Build-Depends: debhelper (>= 9.0.0), curl, libcurl4-openssl-dev, ros-kinetic-catkin, ros-kinetic-dynamic-reconfigure, ros-kinetic-geometry-msgs, ros-kinetic-message-generation, ros-kinetic-message-runtime, ros-kinetic-roscpp, ros-kinetic-std-srvs, ros-kinetic-tf2, ros-kinetic-tf2-ros
+Homepage: http://wiki.ros.org/rc_hand_eye_calibration_client
+Standards-Version: 3.9.2
+
+Package: ros-kinetic-rc-hand-eye-calibration-client
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, curl, libcurl4-openssl-dev, ros-kinetic-dynamic-reconfigure, ros-kinetic-geometry-msgs, ros-kinetic-message-generation, ros-kinetic-message-runtime, ros-kinetic-roscpp, ros-kinetic-std-srvs, ros-kinetic-tf2, ros-kinetic-tf2-ros
+Description: The rc_hand_eye_calibration_client package
