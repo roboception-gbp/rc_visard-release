@@ -1,10 +1,5 @@
 cmake_minimum_required(VERSION 2.8.3)
 
-# Don't set PROJECT_VERSION to empty string when no VERSION is given to project() command.
-if(POLICY CMP0048)
-  cmake_policy(SET CMP0048 OLD)
-endif()
-
 project(rc_hand_eye_calibration_client)
 include(cmake/project_version.cmake)
 
@@ -17,8 +12,12 @@ endif ()
 
 # - Standard definitions -
 
+if (CMAKE_MAJOR_VERSION VERSION_LESS "3.1.0")
+  add_definitions(-std=c++11)
+else ()
+  set(CMAKE_CXX_STANDARD 11)
+endif ()
 add_definitions(-Wall)
-add_definitions(-std=c++11)
 
 # add a target for the submodule CPR doing the REST api calls
 add_subdirectory(opt)
@@ -28,7 +27,7 @@ add_subdirectory(opt)
 ## if COMPONENTS list like find_package(catkin REQUIRED COMPONENTS xyz)
 ## is used, also find other catkin packages
 find_package(catkin REQUIRED COMPONENTS
-  roscpp message_generation std_srvs geometry_msgs dynamic_reconfigure
+  roscpp message_generation std_srvs geometry_msgs dynamic_reconfigure tf2 tf2_ros
 )
 
 
@@ -122,7 +121,7 @@ generate_dynamic_reconfigure_options(cfg/hand_eye_calibration.cfg)
 catkin_package(
 #  INCLUDE_DIRS include
 #  LIBRARIES logging
- CATKIN_DEPENDS message_runtime geometry_msgs
+ CATKIN_DEPENDS message_runtime geometry_msgs tf2 tf2_ros
 #  DEPENDS system_lib
 )
 
