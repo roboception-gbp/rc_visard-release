@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <package format="2">
   <name>rc_hand_eye_calibration_client</name>
-  <version>2.5.0</version>
+  <version>2.6.1</version>
   <description>The rc_hand_eye_calibration_client package</description>
 
   <maintainer email="felix.ruess@roboception.de">Felix Ruess</maintainer>
@@ -21,6 +21,8 @@
   <depend>roscpp</depend>
   <depend>std_srvs</depend>
   <depend>geometry_msgs</depend>
+  <depend>tf2</depend>
+  <depend>tf2_ros</depend>
 
   <depend>dynamic_reconfigure</depend>
   <depend>message_generation</depend>
