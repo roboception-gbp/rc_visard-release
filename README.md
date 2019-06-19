@@ -1,8 +1,11 @@
-ROS client for Roboception's tag detection modules
-==================================================
+ROS interfaces for rc_visard
+============================
 
-This node provides ROS service calls and parameters for TagDetect node.
-For detail description of the TagDetect check rc_visard manual: https://doc.rc-visard.com/latest/en/tagdetect.html
+This repositorty contains ROS interfaces for the [Roboception rc_visard][] 3D sensor.
+
+Please also consult the manual for more details: https://doc.rc-visard.com
+
+The `rc_visard` ROS package is a convenience metapackage which depends on all others.
 
 Installation
 ------------
@@ -10,50 +13,49 @@ Installation
 On Debian/Ubuntu add the ROS sources and
 
 ```bash
-sudo apt-get install ros-${ROS_DISTRO}-rc-tagdetect-client
+sudo apt-get install ros-${ROS_DISTRO}-rc-visard
 ```
 
-### From Source
+rc_visard_driver
+----------------
 
-This package relies on git submodules for the cpr library which need to be initialized before building from source.
+Nodelet/node providing a ROS interface to configure the rc_visard and receive
+images/poses.
 
-~~~bash
-git submodule update --init --recursive
-~~~
+See the [rc_visard_driver README](rc_visard_driver/README.md) for more details.
 
-Configuration
--------------
+rc_visard_description
+---------------------
 
-### Parameters
+Package with xacro and urdf files for rc_visard_65 and rc_visard_160
 
-* `host`: The IP address or hostname of the rc_visard that should be calibrated
+See the [rc_visard_description README](rc_visard_description/README.md) for more details.
 
-### Dynamic reconfigure parameters
+rc_hand_eye_calibration_client
+------------------------------
 
-* `use_cached_images`: Use most recently received image pair instead of waiting for a new pair
-* `forget_after_n_detections`: Number of detection runs after which to forget about a previous tag during tag re-identification
-* `max_corner_distance`: Maximum distance of corresponding tag corners in meters during tag re-identification
-* `quality`: Quality of tag detection (H, M or L).
-* `detect_inverted_tags`: Detect tags with black and white exchanged
-* `publish_visualization`: Whether or not the tf and markers should be published
+Package for calibrating the rc_visard to a robot.
+See the [rc_hand_eye_calibration_client README](rc_hand_eye_calibration_client/README.md) for more details.
 
+rc_pick_client
+--------------
 
-Services
---------
+ROS client for rc_visard's grasp generation modules.
+See the [rc_pick_client README](rc_pick_client/README.md) for more details.
 
-The following services are offered by the node:
+rc_tagdetect_client
+--------------
 
-* `detect`: Trigger single detection
-* `start_continuous_detection`: Starts continuous detection.
-* `stop_continuous_detection`: Stops continuous detection.
+ROS client for rc_visard's tag detection modules.
+See the [rc_tagdetect_client README](rc_tagdetect_client/README.md) for more details
 
+Acknowledgements
+----------------
 
-Launching
----------
+This FTP (Focused Technical Project) has received funding from the European Union’s Horizon 2020 research and innovation programme under the project ROSIN with the grant agreement No 732287.
 
-Using command line parameters:
+ROSIN: ROS-Industrial Quality-Assured Robot Software Components: http://rosin-project.eu
 
-~~~
-rosrun rc_tagdetect_client rc_april_node _host:=sensor_ip
-rosrun rc_tagdetect_client rc_qr_node _host:=sensor_ip
-~~~
+![EU flag](rosin_eu_flag.jpg) ![ROSIN logo](rosin_ack_logo_wide.png)
+
+[Roboception rc_visard]: http://roboception.com/rc_visard
