@@ -99,8 +99,6 @@ namespace rc
 {
 namespace rcd = dynamics;
 
-#define ROS_HAS_STEADYTIME (ROS_VERSION_MINIMUM(1, 13, 1) || ((ROS_VERSION_MINOR == 12) && ROS_VERSION_PATCH >= 8))
-
 ThreadedStream::Ptr DeviceNodelet::CreateDynamicsStreamOfType(rcd::RemoteInterface::Ptr rcdIface,
                                                               const std::string& stream, ros::NodeHandle& nh,
                                                               const std::string& frame_id_prefix, bool tfEnabled)
@@ -764,6 +762,37 @@ void DeviceNodelet::reconfigure(rc_visard_driver::rc_visard_driverConfig& c, uin
     c.out2_mode = "Low";
   }
 
+  // If camera_exp_auto (ExposureAuto) is changed, immediately set new value here
+  // so that ExposureTime and Gain can be read and published again.
+  // If we do this in the grabbing thread we have a race condition and another parameter update
+  // in the meantime could be lost because we need to overwrite the config with the updated time and gain values.
+  if (l & 2)
+  {
+    l &= ~2;
+
+    if (rcgnodemap)
+    {
+      if (c.camera_exp_auto)
+      {
+        rcg::setEnum(rcgnodemap, "ExposureAuto", "Continuous", true);
+      }
+      else
+      {
+        rcg::setEnum(rcgnodemap, "ExposureAuto", "Off", true);
+      }
+
+      // if exposure mode changed to manual, read current exposure value and gain again
+      if (!c.camera_exp_auto)
+      {
+        c.camera_exp_value = rcg::getFloat(rcgnodemap, "ExposureTime", 0, 0, true, true) / 1000000;
+        if (dev_supports_gain)
+        {
+          c.camera_gain_value = rcg::getFloat(rcgnodemap, "Gain", 0, 0, true, true);
+        }
+      }
+    }
+  }
+
   // copy config for using it in the grabbing thread
 
   config = c;
@@ -797,19 +826,7 @@ void setConfiguration(const std::shared_ptr<GenApi::CNodeMapRef>& nodemap,
         rcg::setFloat(nodemap, "AcquisitionFrameRate", cfg.camera_fps, true);
       }
 
-      if (lvl & 2)
-      {
-        lvl &= ~2;
-
-        if (cfg.camera_exp_auto)
-        {
-          rcg::setEnum(nodemap, "ExposureAuto", "Continuous", true);
-        }
-        else
-        {
-          rcg::setEnum(nodemap, "ExposureAuto", "Off", true);
-        }
-      }
+      // lvl 2 (camera_exp_auto) is immediately set in dynamic reconfigure callback
 
       if (lvl & 4)
       {
@@ -1239,11 +1256,7 @@ void DeviceNodelet::grab(std::string device, rcg::Device::ACCESS access)
         stream[0]->startStreaming();
 
         // enter grabbing loop
-#if ROS_HAS_STEADYTIME
         ros::SteadyTime tlastimage = ros::SteadyTime::now();
-#else
-        ros::WallTime tlastimage = ros::WallTime::now();
-#endif
 
         while (!stopImageThread)
         {
@@ -1274,11 +1287,7 @@ void DeviceNodelet::grab(std::string device, rcg::Device::ACCESS access)
               if (buffer->getImagePresent(part))
               {
                 // reset counter of consecutive missing images and failures
-#if ROS_HAS_STEADYTIME
                 tlastimage = ros::SteadyTime::now();
-#else
-                tlastimage = ros::WallTime::now();
-#endif
                 cntConsecutiveFails = 0;
                 imageSuccess = true;
 
@@ -1319,11 +1328,7 @@ void DeviceNodelet::grab(std::string device, rcg::Device::ACCESS access)
           }
           else if (buffer != 0 && buffer->getIsIncomplete())
           {
-#if ROS_HAS_STEADYTIME
             tlastimage = ros::SteadyTime::now();
-#else
-            tlastimage = ros::WallTime::now();
-#endif
             totalIncompleteBuffers++;
             ROS_WARN("rc_visard_driver: Received incomplete image buffer");
           }
@@ -1335,11 +1340,7 @@ void DeviceNodelet::grab(std::string device, rcg::Device::ACCESS access)
             if (cintensity || cintensitycombined ||
                 (is_depth_acquisition_continuous && (cdisparity || cconfidence || cerror)))
             {
-#if ROS_HAS_STEADYTIME
               double t = (ros::SteadyTime::now() - tlastimage).toSec();
-#else
-              double t = (ros::WallTime::now() - tlastimage).toSec();
-#endif
 
               if (t > 3)  // report error
               {
@@ -1354,11 +1355,7 @@ void DeviceNodelet::grab(std::string device, rcg::Device::ACCESS access)
               // if nothing is expected then store current time as last time
               // to avoid possible timeout after resubscription
 
-#if ROS_HAS_STEADYTIME
               tlastimage = ros::SteadyTime::now();
-#else
-              tlastimage = ros::WallTime::now();
-#endif
             }
           }
 
@@ -1438,18 +1435,6 @@ void DeviceNodelet::grab(std::string device, rcg::Device::ACCESS access)
 
             disprange = cfg.depth_disprange;
 
-            // if exposure mode to manual, read current exposure value and gain again
-            if (lvl & 2 && !cfg.camera_exp_auto)
-            {
-              boost::recursive_mutex::scoped_lock lock(mtx);
-              cfg.camera_exp_value = rcg::getFloat(rcgnodemap, "ExposureTime", 0, 0, true, true) / 1000000;
-              if (dev_supports_gain)
-              {
-                cfg.camera_gain_value = rcg::getFloat(rcgnodemap, "Gain", 0, 0, true, true);
-              }
-              reconfig->updateConfig(cfg);
-            }
-
             // if in alternate mode, then make publishers aware of it
 
             if (lvl & 262144)
@@ -1477,11 +1462,7 @@ void DeviceNodelet::grab(std::string device, rcg::Device::ACCESS access)
             {
               if (is_depth_acquisition_continuous)
               {
-#if ROS_HAS_STEADYTIME
                 tlastimage = ros::SteadyTime::now();
-#else
-                tlastimage = ros::WallTime::now();
-#endif
               }
             }
           }
@@ -1528,244 +1509,6 @@ bool DeviceNodelet::depthAcquisitionTrigger(std_srvs::Trigger::Request& req,
   return true;
 }
 
-// Anonymous namespace for local linkage
-namespace
-{
-/// Commands taken by handleDynamicsStateChangeRequest()
-enum class DynamicsCmd
-{
-  START = 0,
-  START_SLAM,
-  STOP,
-  STOP_SLAM,
-  RESTART,
-  RESTART_SLAM,
-  RESET_SLAM
-};
-
-///@return whether the service call has been accepted
-void handleDynamicsStateChangeRequest(rcd::RemoteInterface::Ptr dynIF, DynamicsCmd state,
-                                      std_srvs::Trigger::Response& resp)
-{
-  resp.success = true;
-  resp.message = "";
-
-  std::string new_state;
-
-  if (dynIF)
-  {
-    try
-    {
-      switch (state)
-      {
-        case DynamicsCmd::STOP:
-          new_state = dynIF->stop();
-          break;
-        case DynamicsCmd::STOP_SLAM:
-          new_state = dynIF->stopSlam();
-          break;
-        case DynamicsCmd::START:
-          new_state = dynIF->start();
-          break;
-        case DynamicsCmd::START_SLAM:
-          new_state = dynIF->startSlam();
-          break;
-        case DynamicsCmd::RESTART_SLAM:
-          new_state = dynIF->restartSlam();
-          break;
-        case DynamicsCmd::RESTART:
-          new_state = dynIF->restart();
-          break;
-        case DynamicsCmd::RESET_SLAM:
-          new_state = dynIF->resetSlam();
-          break;
-        default:
-          throw std::runtime_error("handleDynamicsStateChangeRequest: unrecognized state change request");
-      }
-      if (new_state == rcd::RemoteInterface::State::FATAL)
-      {
-        resp.success = false;
-        resp.message = "rc_dynamics module is in " + new_state + " state. Check the log files.";
-      }
-    }
-    catch (std::exception& e)
-    {
-      resp.success = false;
-      resp.message = std::string("Failed to change state of rcdynamics module: ") + e.what();
-    }
-  }
-  else
-  {
-    resp.success = false;
-    resp.message = "rcdynamics remote interface not yet initialized!";
-  }
-
-  if (!resp.success)
-    ROS_ERROR_STREAM(resp.message);
-}
-}
-
-bool DeviceNodelet::dynamicsStart(std_srvs::Trigger::Request& req, std_srvs::Trigger::Response& resp)
-{
-  handleDynamicsStateChangeRequest(dynamicsInterface, DynamicsCmd::START, resp);
-  return true;
-}
-
-bool DeviceNodelet::dynamicsStartSlam(std_srvs::Trigger::Request& req, std_srvs::Trigger::Response& resp)
-{
-  handleDynamicsStateChangeRequest(dynamicsInterface, DynamicsCmd::START_SLAM, resp);
-  return true;
-}
-
-bool DeviceNodelet::dynamicsRestart(std_srvs::Trigger::Request& req, std_srvs::Trigger::Response& resp)
-{
-  handleDynamicsStateChangeRequest(dynamicsInterface, DynamicsCmd::RESTART, resp);
-  return true;
-}
-
-bool DeviceNodelet::dynamicsRestartSlam(std_srvs::Trigger::Request& req, std_srvs::Trigger::Response& resp)
-{
-  handleDynamicsStateChangeRequest(dynamicsInterface, DynamicsCmd::RESTART_SLAM, resp);
-  return true;
-}
-
-bool DeviceNodelet::dynamicsStop(std_srvs::Trigger::Request& req, std_srvs::Trigger::Response& resp)
-{
-  handleDynamicsStateChangeRequest(dynamicsInterface, DynamicsCmd::STOP, resp);
-  return true;
-}
-
-bool DeviceNodelet::dynamicsStopSlam(std_srvs::Trigger::Request& req, std_srvs::Trigger::Response& resp)
-{
-  handleDynamicsStateChangeRequest(dynamicsInterface, DynamicsCmd::STOP_SLAM, resp);
-  return true;
-}
-
-bool DeviceNodelet::dynamicsResetSlam(std_srvs::Trigger::Request& req, std_srvs::Trigger::Response& resp)
-{
-  handleDynamicsStateChangeRequest(dynamicsInterface, DynamicsCmd::RESET_SLAM, resp);
-  return true;
-}
-
-bool DeviceNodelet::getSlamTrajectory(rc_visard_driver::GetTrajectory::Request& req,
-                                      rc_visard_driver::GetTrajectory::Response& resp)
-{
-  TrajectoryTime start(req.start_time.sec, req.start_time.nsec, req.start_time_relative);
-  TrajectoryTime end(req.end_time.sec, req.end_time.nsec, req.end_time_relative);
-
-  auto pbTraj = dynamicsInterface->getSlamTrajectory(start, end);
-  resp.trajectory.header.frame_id = pbTraj.parent();
-  resp.trajectory.header.stamp.sec = pbTraj.timestamp().sec();
-  resp.trajectory.header.stamp.nsec = pbTraj.timestamp().nsec();
-
-  for (auto pbPose : pbTraj.poses())
-  {
-    geometry_msgs::PoseStamped rosPose;
-    rosPose.header.frame_id = pbTraj.parent();
-    rosPose.header.stamp.sec = pbPose.timestamp().sec();
-    rosPose.header.stamp.nsec = pbPose.timestamp().nsec();
-    rosPose.pose.position.x = pbPose.pose().position().x();
-    rosPose.pose.position.y = pbPose.pose().position().y();
-    rosPose.pose.position.z = pbPose.pose().position().z();
-    rosPose.pose.orientation.x = pbPose.pose().orientation().x();
-    rosPose.pose.orientation.y = pbPose.pose().orientation().y();
-    rosPose.pose.orientation.z = pbPose.pose().orientation().z();
-    rosPose.pose.orientation.w = pbPose.pose().orientation().w();
-    resp.trajectory.poses.push_back(rosPose);
-  }
-
-  // additionally publish extracted trajectory on topic
-  if (autopublishTrajectory)
-  {
-    trajPublisher.publish(resp.trajectory);
-  }
-
-  return true;
-}
-
-bool DeviceNodelet::saveSlamMap(std_srvs::Trigger::Request& req, std_srvs::Trigger::Response& resp)
-{
-  resp.success = false;
-
-  if (dynamicsInterface)
-  {
-    try
-    {
-      rcd::RemoteInterface::ReturnCode rc = dynamicsInterface->saveSlamMap();
-      resp.success = (rc.value >= 0);
-      resp.message = rc.message;
-    }
-    catch (std::exception& e)
-    {
-      resp.message = std::string("Failed to save SLAM map: ") + e.what();
-    }
-  }
-  else
-  {
-    resp.message = "rcdynamics remote interface not yet initialized!";
-  }
-
-  if (!resp.success)
-    ROS_ERROR_STREAM(resp.message);
-
-  return true;
-}
-
-bool DeviceNodelet::loadSlamMap(std_srvs::Trigger::Request& req, std_srvs::Trigger::Response& resp)
-{
-  resp.success = false;
-
-  if (dynamicsInterface)
-  {
-    try
-    {
-      rcd::RemoteInterface::ReturnCode rc = dynamicsInterface->loadSlamMap();
-      resp.success = (rc.value >= 0);
-      resp.message = rc.message;
-    }
-    catch (std::exception& e)
-    {
-      resp.message = std::string("Failed to load SLAM map: ") + e.what();
-    }
-  }
-  else
-  {
-    resp.message = "rcdynamics remote interface not yet initialized!";
-  }
-
-  if (!resp.success)
-    ROS_ERROR_STREAM(resp.message);
-
-  return true;
-}
-
-bool DeviceNodelet::removeSlamMap(std_srvs::Trigger::Request& req, std_srvs::Trigger::Response& resp)
-{
-  resp.success = false;
-
-  if (dynamicsInterface)
-  {
-    try
-    {
-      rcd::RemoteInterface::ReturnCode rc = dynamicsInterface->removeSlamMap();
-      resp.success = (rc.value >= 0);
-      resp.message = rc.message;
-    }
-    catch (std::exception& e)
-    {
-      resp.message = std::string("Failed to remove SLAM map: ") + e.what();
-    }
-  }
-  else
-  {
-    resp.message = "rcdynamics remote interface not yet initialized!";
-  }
-
-  if (!resp.success)
-    ROS_ERROR_STREAM(resp.message);
-
-  return true;
-}
 
 void DeviceNodelet::produce_connection_diagnostics(diagnostic_updater::DiagnosticStatusWrapper &stat)
 {
@@ -1813,6 +1556,6 @@ void DeviceNodelet::produce_device_diagnostics(diagnostic_updater::DiagnosticSta
   }
 }
 
-}
+} // namespace rc
 
 PLUGINLIB_EXPORT_CLASS(rc::DeviceNodelet, nodelet::Nodelet)
