@@ -2,6 +2,15 @@
 Changelog for package rc_hand_eye_calibration_client
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+2.6.4 (2019-06-19)
+------------------
+* fix published tf transform
+
+2.6.3 (2019-06-12)
+------------------
+* add debian package dependencies
+* tf: invert transform so that the sensor is the child
+
 2.6.2 (2019-06-11)
 ------------------
 
