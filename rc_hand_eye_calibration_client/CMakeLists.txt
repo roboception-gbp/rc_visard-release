@@ -27,7 +27,7 @@ add_subdirectory(opt)
 ## if COMPONENTS list like find_package(catkin REQUIRED COMPONENTS xyz)
 ## is used, also find other catkin packages
 find_package(catkin REQUIRED COMPONENTS
-  roscpp message_generation std_srvs geometry_msgs dynamic_reconfigure tf2 tf2_ros
+  roscpp message_generation std_srvs geometry_msgs dynamic_reconfigure tf2 tf2_ros tf2_geometry_msgs
 )
 
 
@@ -210,5 +210,5 @@ install(TARGETS rc_hand_eye_calibration_client_node
 ## Define information for packaging ##
 ######################################
 # optionally specify dependencies of the debian package here (comma separated!)
-#set(CPACK_DEBIAN_PACKAGE_DEPENDS "cvkit (>= 1.7.0), ros-$ENV{ROS_DISTRO}-rc-imagecommon")
+set(CPACK_DEBIAN_PACKAGE_DEPENDS "ros-$ENV{ROS_DISTRO}-tf2, ros-$ENV{ROS_DISTRO}-tf2-ros")
 include(cmake/package_debian.cmake)
