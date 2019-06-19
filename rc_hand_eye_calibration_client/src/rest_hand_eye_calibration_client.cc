@@ -224,16 +224,13 @@ void CalibrationWrapper::requestCalibration(const ros::SteadyTimerEvent&)
 
 void CalibrationWrapper::updateCalibrationCache(const rc_hand_eye_calibration_client::CalibrationResponse& response)
 {
-  current_calibration_.header.frame_id = camera_frame_id_;
-  //Select child frame based on the type of calibration hand-eye (on-robot-cam) or base-eye (external cam)
-  current_calibration_.child_frame_id = response.robot_mounted ? endeff_frame_id_ : base_frame_id_;
+  //Select frame_id based on the type of calibration hand-eye (on-robot-cam) or base-eye (external cam)
+  current_calibration_.header.frame_id = response.robot_mounted ? endeff_frame_id_ : base_frame_id_;
+  current_calibration_.child_frame_id = camera_frame_id_;
   current_calibration_.transform.translation.x = response.pose.position.x;
   current_calibration_.transform.translation.y = response.pose.position.y;
   current_calibration_.transform.translation.z = response.pose.position.z;
-  current_calibration_.transform.rotation.x = response.pose.orientation.x;
-  current_calibration_.transform.rotation.y = response.pose.orientation.y;
-  current_calibration_.transform.rotation.z = response.pose.orientation.z;
-  current_calibration_.transform.rotation.w = response.pose.orientation.w;
+  current_calibration_.transform.rotation = response.pose.orientation;
 }
 
 void CalibrationWrapper::sendCachedCalibration(const ros::SteadyTimerEvent&)
