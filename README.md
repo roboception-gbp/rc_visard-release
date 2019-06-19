@@ -1,11 +1,8 @@
-ROS interfaces for rc_visard
-============================
+ROS client for Roboception's grasp generation modules
+=====================================================
 
-This repositorty contains ROS interfaces for the [Roboception rc_visard][] 3D sensor.
-
-Please also consult the manual for more details: https://doc.rc-visard.com
-
-The `rc_visard` ROS package is a convenience metapackage which depends on all others.
+This node provides ROS service calls and parameters for ItemPick node.
+For detail description of the ItemPick module check rc_visard manual: https://doc.rc-visard.com/latest/en/itempick.html
 
 Installation
 ------------
@@ -13,49 +10,57 @@ Installation
 On Debian/Ubuntu add the ROS sources and
 
 ```bash
-sudo apt-get install ros-${ROS_DISTRO}-rc-visard
+sudo apt-get install ros-${ROS_DISTRO}-rc-pick-client
 ```
 
-rc_visard_driver
-----------------
+### From Source
 
-Nodelet/node providing a ROS interface to configure the rc_visard and receive
-images/poses.
+This package relies on git submodules for the cpr library which need to be initialized before building from source.
 
-See the [rc_visard_driver README](rc_visard_driver/README.md) for more details.
+~~~bash
+git submodule update --init --recursive
+~~~
 
-rc_visard_description
----------------------
+Configuration
+-------------
 
-Package with xacro and urdf files for rc_visard_65 and rc_visard_160
+### Parameters
 
-See the [rc_visard_description README](rc_visard_description/README.md) for more details.
+* `host`: The IP address or hostname of the rc_visard that should be calibrated
 
-rc_hand_eye_calibration_client
-------------------------------
+### Dynamic reconfigure parameters
 
-Package for calibrating the rc_visard to a robot.
-See the [rc_hand_eye_calibration_client README](rc_hand_eye_calibration_client/README.md) for more details.
+* `load_carrier_crop_distance`: Safety margin in meters by which the load carrier inner dimensions are reduced to define the region of interest for grasp computation
+* `load_carrier_model_tolerance`: Indicates how much the estimated load carrier dimensions are allowed to differ from the load carrier model dimensions in meters
+* `cluster_max_dimension`: Indicates how much the estimated load carrier dimensions are allowed to differ from the load carrier model dimensions in meters
+* `cluster_max_curvature`: Maximum curvature allowed within one cluster. The smaller this value, the more clusters will be split apart.
+* `clustering_patch_size`: Size in pixels of the square patches the depth map is subdivided into during the first clustering step
+* `clustering_max_surface_rmse`: Maximum root-mean-square error (RMSE) in meters of points belonging to a surface
+* `clustering_discontinuity_factor`: Factor used to discriminate depth discontinuities within a patch. The smaller this value, the more clusters will be split apart.
 
-rc_pick_client
---------------
+Services
+--------
 
-ROS client for rc_visard's grasp generation modules.
-See the [rc_pick_client README](rc_pick_client/README.md) for more details.
+The following services are offered by the node:
 
-rc_tagdetect_client
---------------
+* `start`: Starts the component.
+* `stop`: Stops the component.
+* `set_region_of_interest`: Persistently stores a region of interest on the rc_visard.
+* `get_region_of_interests`: Returns the configured regions of interest with the requested region_of_interest_ids. If no region_of_interest_ids are provided, all configured regions of interest are returned.
+* `delete_regions_of_interest`: Deletes the configured regions of interest with the requested region_of_interest_ids
+* `set_load_carrier`: Persistently stores a load carrier on the rc_visard.
+* `get_load_carriers`: Returns the configured load carriers with the requested load_carrier_ids. If no load_carrier_ids are provided, all configured load carriers are returned.
+* `delete_load_carriers`: Deletes the configured load carriers with the requested load_carrier_ids
+* `detect_load_carrier`: Triggers a load carrier detection.
+* `compute_grasps`: Triggers the computation of grasping poses for a suction device. All images used by the node are guaranteed to be newer than the service trigger time.
 
-ROS client for rc_visard's tag detection modules.
-See the [rc_tagdetect_client README](rc_tagdetect_client/README.md) for more details
 
-Acknowledgements
-----------------
 
-This FTP (Focused Technical Project) has received funding from the European Union’s Horizon 2020 research and innovation programme under the project ROSIN with the grant agreement No 732287.
+Launching
+---------
 
-ROSIN: ROS-Industrial Quality-Assured Robot Software Components: http://rosin-project.eu
+Using command line parameters:
 
-![EU flag](rosin_eu_flag.jpg) ![ROSIN logo](rosin_ack_logo_wide.png)
-
-[Roboception rc_visard]: http://roboception.com/rc_visard
+~~~
+rosrun rc_pick_client rc_itempick_client_node _host:=sensor_ip
+~~~
