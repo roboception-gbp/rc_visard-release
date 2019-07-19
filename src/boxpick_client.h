@@ -1,7 +1,7 @@
 /*
  * Copyright (c) 2019 Roboception GmbH
  *
- * Author: Monika Florek-Jasinska
+ * Author: Carlos Xavier Garcia Briones, Monika Florek-Jasinska
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -30,36 +30,35 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef RC_PICK_CLIENT_CPR_HELPER_H
-#define RC_PICK_CLIENT_CPR_HELPER_H
 
-#include <json/json.hpp>
+#ifndef RC_PICK_CLIENT_BOXPICK_CLIENT_H
+#define RC_PICK_CLIENT_BOXPICK_CLIENT_H
 
-#include <string>
+#include "pick_client.h"
+#include "rc_pick_client/ComputeBoxGrasps.h"
+#include "rc_pick_client/DetectBoxItems.h"
 
-using json = nlohmann::json;
-
-namespace rc_itempick_cpr
+namespace ros_pick_client
 {
-class CommunicationHelper
+class BoxpickClient : public PickClient
 {
   public:
-    CommunicationHelper(const std::string &host, const std::string &node_name,
-                        int timeout);
+    BoxpickClient(const std::string &host, const ros::NodeHandle &nh);
 
-    json servicePutRequest(const std::string &service_name);
-
-    json servicePutRequest(const std::string &service_name, const json &js_args);
-
-    json getParameters();
-
-    void setParameters(const json& js_params);
+    ~BoxpickClient() = default;
 
   private:
-    // REST stuff
-    const std::string host_, services_url_, params_url_;
-    const int timeout_curl_; // ms
-};
+    bool computeGraspsSrv(rc_pick_client::ComputeBoxGraspsRequest &request,
+                          rc_pick_client::ComputeBoxGraspsResponse &response);
 
+    bool detectItemsSrv(rc_pick_client::DetectBoxItemsRequest &request,
+                        rc_pick_client::DetectBoxItemsResponse &response);
+
+    void dynamicReconfigureCallback(rc_pick_client::pickModuleConfig &config, uint32_t);
+
+    ros::ServiceServer srv_detect_items_;
+    ros::ServiceServer srv_compute_grasps_;
+};
 }
-#endif //RC_PICK_CLIENT_CPR_HELPER_H
+
+#endif // RC_PICK_CLIENT_BOXPICK_CLIENT_H
