@@ -59,6 +59,7 @@
 #include <ros/ros.h>
 #include <geometry_msgs/PoseWithCovarianceStamped.h>
 #include <tf/transform_broadcaster.h>
+#include <rc_common_msgs/ReturnCodeConstants.h>
 
 namespace {
 
@@ -98,6 +99,7 @@ namespace {
 namespace rc
 {
 namespace rcd = dynamics;
+using rc_common_msgs::ReturnCodeConstants;
 
 ThreadedStream::Ptr DeviceNodelet::CreateDynamicsStreamOfType(rcd::RemoteInterface::Ptr rcdIface,
                                                               const std::string& stream, ros::NodeHandle& nh,
@@ -380,17 +382,17 @@ void DeviceNodelet::keepAliveAndRecoverFromFails()
                           "autostart_dynamics=" << autostartDynamics << ", "
                           "autostart_dynamics_with_slam=" << autostartSlam << ")");
 
-          std_srvs::Trigger::Request dummyreq;
-          std_srvs::Trigger::Response dummyresp;
+          rc_common_msgs::Trigger::Request dummyreq;
+          rc_common_msgs::Trigger::Response dummyresp;
 
           bool autostart_failed = false;
           autostart_failed |= (autostartSlam     && !this->dynamicsStartSlam(dummyreq, dummyresp));
           autostart_failed |= (!autostartSlam && autostartDynamics && !this->dynamicsStart(dummyreq, dummyresp));
-          autostart_failed |= !dummyresp.success;
+          autostart_failed |= dummyresp.return_code.value < ReturnCodeConstants::SUCCESS;
 
           if (autostart_failed)
           {
-            ROS_WARN_STREAM("rc_visard_driver: Could not auto-start dynamics module! " << dummyresp.message);
+            ROS_WARN_STREAM("rc_visard_driver: Could not auto-start dynamics module! " << dummyresp.return_code.message);
             cntConsecutiveRecoveryFails++;
             continue;  // to next trial!
           }
@@ -445,8 +447,8 @@ void DeviceNodelet::keepAliveAndRecoverFromFails()
 
   if (autostopDynamics)
   {
-    std_srvs::Trigger::Request dummyreq;
-    std_srvs::Trigger::Response dummyresp;
+    rc_common_msgs::Trigger::Request dummyreq;
+    rc_common_msgs::Trigger::Response dummyresp;
     ROS_INFO("rc_visard_driver: Autostop dynamics ...");
     if (!this->dynamicsStop(dummyreq, dummyresp))
     {  // autostop failed!
@@ -470,6 +472,12 @@ void DeviceNodelet::initConfiguration(const std::shared_ptr<GenApi::CNodeMapRef>
 
   cfg.camera_exp_value = rcg::getFloat(nodemap, "ExposureTime", 0, 0, true) / 1000000;
   cfg.camera_exp_max = rcg::getFloat(nodemap, "ExposureTimeAutoMax", 0, 0, true) / 1000000;
+
+  // get optional exposure region
+  cfg.camera_exp_width = rcg::getInteger(nodemap, "ExposureRegionWidth", 0, 0, false);
+  cfg.camera_exp_height = rcg::getInteger(nodemap, "ExposureRegionHeight", 0, 0, false);
+  cfg.camera_exp_offset_x = rcg::getInteger(nodemap, "ExposureRegionOffsetX", 0, 0, false);
+  cfg.camera_exp_offset_y = rcg::getInteger(nodemap, "ExposureRegionOffsetY", 0, 0, false);
 
   // get optional gain value
 
@@ -622,6 +630,10 @@ void DeviceNodelet::initConfiguration(const std::shared_ptr<GenApi::CNodeMapRef>
   pnh.param("camera_exp_value", cfg.camera_exp_value, cfg.camera_exp_value);
   pnh.param("camera_gain_value", cfg.camera_gain_value, cfg.camera_gain_value);
   pnh.param("camera_exp_max", cfg.camera_exp_max, cfg.camera_exp_max);
+  pnh.param("camera_exp_width", cfg.camera_exp_width, cfg.camera_exp_width);
+  pnh.param("camera_exp_height", cfg.camera_exp_height, cfg.camera_exp_height);
+  pnh.param("camera_exp_offset_x", cfg.camera_exp_offset_x, cfg.camera_exp_offset_x);
+  pnh.param("camera_exp_offset_y", cfg.camera_exp_offset_y, cfg.camera_exp_offset_y);
   pnh.param("camera_wb_auto", cfg.camera_wb_auto, cfg.camera_wb_auto);
   pnh.param("camera_wb_ratio_red", cfg.camera_wb_ratio_red, cfg.camera_wb_ratio_red);
   pnh.param("camera_wb_ratio_blue", cfg.camera_wb_ratio_blue, cfg.camera_wb_ratio_blue);
@@ -648,6 +660,10 @@ void DeviceNodelet::initConfiguration(const std::shared_ptr<GenApi::CNodeMapRef>
   pnh.setParam("camera_exp_value", cfg.camera_exp_value);
   pnh.setParam("camera_gain_value", cfg.camera_gain_value);
   pnh.setParam("camera_exp_max", cfg.camera_exp_max);
+  pnh.setParam("camera_exp_width", cfg.camera_exp_width);
+  pnh.setParam("camera_exp_height", cfg.camera_exp_height);
+  pnh.setParam("camera_exp_offset_x", cfg.camera_exp_offset_x);
+  pnh.setParam("camera_exp_offset_y", cfg.camera_exp_offset_y);
   pnh.setParam("camera_wb_auto", cfg.camera_wb_auto);
   pnh.setParam("camera_wb_ratio_red", cfg.camera_wb_ratio_red);
   pnh.setParam("camera_wb_ratio_blue", cfg.camera_wb_ratio_blue);
@@ -844,6 +860,30 @@ void setConfiguration(const std::shared_ptr<GenApi::CNodeMapRef>& nodemap,
       {
         lvl &= ~8;
         rcg::setFloat(nodemap, "ExposureTimeAutoMax", 1000000 * cfg.camera_exp_max, true);
+      }
+
+      if (lvl & 8388608)
+      {
+        lvl &= ~8388608;
+        rcg::setInteger(nodemap, "ExposureRegionWidth", cfg.camera_exp_width, false);
+      }
+
+      if (lvl & 16777216)
+      {
+        lvl &= ~16777216;
+        rcg::setInteger(nodemap, "ExposureRegionHeight", cfg.camera_exp_height, false);
+      }
+
+      if (lvl & 33554432)
+      {
+        lvl &= ~33554432;
+        rcg::setInteger(nodemap, "ExposureRegionOffsetX", cfg.camera_exp_offset_x, false);
+      }
+
+      if (lvl & 67108864)
+      {
+        lvl &= ~67108864;
+        rcg::setInteger(nodemap, "ExposureRegionOffsetY", cfg.camera_exp_offset_y, false);
       }
 
       if (lvl & 16384)
@@ -1498,13 +1538,13 @@ void DeviceNodelet::grab(std::string device, rcg::Device::ACCESS access)
   }
 }
 
-bool DeviceNodelet::depthAcquisitionTrigger(std_srvs::Trigger::Request& req,
-                                            std_srvs::Trigger::Response& resp)
+bool DeviceNodelet::depthAcquisitionTrigger(rc_common_msgs::Trigger::Request& req,
+                                            rc_common_msgs::Trigger::Response& resp)
 {
   perform_depth_acquisition_trigger = true;
 
-  resp.success = true;
-  resp.message = "";
+  resp.return_code.value = ReturnCodeConstants::SUCCESS;
+  resp.return_code.message = "";
 
   return true;
 }
