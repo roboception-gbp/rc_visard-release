@@ -1,3 +1,33 @@
+## rc_visard (kinetic) - 2.7.0-1
+
+The packages in the `rc_visard` repository were released into the `kinetic` distro by running `/usr/bin/bloom-release --ros-distro kinetic rc_visard` on `Fri, 19 Jul 2019 14:37:18 -0000`
+
+These packages were released:
+- `rc_hand_eye_calibration_client`
+- `rc_pick_client`
+- `rc_roi_manager_gui`
+- `rc_tagdetect_client`
+- `rc_visard`
+- `rc_visard_description`
+- `rc_visard_driver`
+
+Version of package(s) in repository `rc_visard`:
+
+- upstream repository: https://github.com/roboception/rc_visard_ros.git
+- release repository: https://github.com/roboception-gbp/rc_visard-release.git
+- rosdistro version: `2.6.4-1`
+- old version: `2.6.4-1`
+- new version: `2.7.0-1`
+
+Versions of tools used:
+
+- bloom version: `0.8.0`
+- catkin_pkg version: `0.4.12`
+- rosdep version: `0.15.2`
+- rosdistro version: `0.7.4`
+- vcstools version: `0.1.40`
+
+
 ## rc_visard (kinetic) - 2.6.4-1
 
 The packages in the `rc_visard` repository were released into the `kinetic` distro by running `/usr/bin/bloom-release --ros-distro kinetic rc_visard` on `Wed, 19 Jun 2019 11:34:13 -0000`
