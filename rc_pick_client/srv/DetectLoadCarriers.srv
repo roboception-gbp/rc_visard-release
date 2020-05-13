@@ -1,11 +1,6 @@
 # Description: Triggers the detection of the given load carriers.
 
-# A valid pose_frame (either camera or external) is required in the request.
-# It can be provided either with the pose_frame field, as pose_frame of the selected region of interest
-# or as pose_frame of the selected load carriers.
-# If more than one pose_frame is provided, they must to be consistent.
-
-# Optional. Pose frame for output poses.
+# Required. Pose frame for output poses (valid values are camera and external)
 string pose_frame
 
 # Optional

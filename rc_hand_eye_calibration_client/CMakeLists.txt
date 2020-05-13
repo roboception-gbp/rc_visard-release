@@ -76,7 +76,9 @@ find_package(RCDISCOVER REQUIRED)
 add_service_files(
   FILES
   Calibration.srv
+  SetCalibration.srv
   SetCalibrationPose.srv
+  Trigger.srv
 )
 
 ## Generate actions in the 'action' folder
@@ -145,7 +147,7 @@ include_directories(
 # )
 
 ## Declare a cpp executable
-add_executable(rc_hand_eye_calibration_client_node src/rc_hand_eye_calibration_client_node.cpp src/rest_hand_eye_calibration_client.cc)
+add_executable(rc_hand_eye_calibration_client_node src/rest_helper.cpp src/rc_hand_eye_calibration_client_node.cpp src/rc_hand_eye_calibration_client.cpp)
 
 ## Add cmake target dependencies of the executable/library
 ## as an example, message headers may need to be generated before nodes
