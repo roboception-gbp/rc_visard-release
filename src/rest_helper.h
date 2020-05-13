@@ -30,38 +30,37 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef RC_ITEMPICK_CLIENT_CPR_HELPER_H
-#define RC_ITEMPICK_CLIENT_CPR_HELPER_H
+#ifndef rc_rest_api_HELPER_H
+#define rc_rest_api_HELPER_H
 
 #include <string>
 #include <json/json.hpp>
 
-#include "exceptions.h"
+#include "rest_exceptions.h"
 
 using json = nlohmann::json;
 
-namespace rc_tagdetect_client
+namespace rc_rest_api
 {
-class CommunicationHelper
+class RestHelper
 {
-  public:
-    CommunicationHelper(const std::string &host, const std::string &node_name,
-                        int timeout);
+public:
+  RestHelper(const std::string& host, const std::string& node_name, int timeout);
 
-    json servicePutRequest(const std::string &service_name);
+  json servicePutRequest(const std::string& service_name);
 
-    json servicePutRequest(const std::string &service_name, const json &js_args);
+  json servicePutRequest(const std::string& service_name, const json& js_args);
 
-    json getParameters();
+  json getParameters();
 
-    std::tuple<size_t, size_t, size_t> getImageVersion();
+  std::tuple<size_t, size_t, size_t> getImageVersion();
 
-    void setParameters(const json &js_params);
+  json setParameters(const json& js_params);
 
-  private:
-    const std::string host_, services_url_, params_url_, version_url_;
-    const int timeout_curl_; // ms
+private:
+  const std::string host_, services_url_, params_url_, version_url_;
+  const int timeout_curl_;  // ms
 };
 
-}
-#endif //RC_ITEMPICK_CLIENT_CPR_HELPER_H
+}  // namespace rc_rest_api
+#endif  // rc_rest_api_HELPER_H
