@@ -33,6 +33,7 @@
 
 #include "device_nodelet.h"
 #include "publishers/camera_info_publisher.h"
+#include "publishers/camera_param_publisher.h"
 #include "publishers/image_publisher.h"
 #include "publishers/disparity_publisher.h"
 #include "publishers/disparity_color_publisher.h"
@@ -41,6 +42,8 @@
 #include "publishers/error_disparity_publisher.h"
 #include "publishers/error_depth_publisher.h"
 #include "publishers/points2_publisher.h"
+
+#include "publishers/protobuf2ros_conversions.h"
 
 #include <rc_genicam_api/device.h>
 #include <rc_genicam_api/stream.h>
@@ -60,6 +63,7 @@
 #include <geometry_msgs/PoseWithCovarianceStamped.h>
 #include <tf/transform_broadcaster.h>
 #include <rc_common_msgs/ReturnCodeConstants.h>
+#include <rc_common_msgs/CameraParam.h>
 
 namespace {
 
@@ -94,6 +98,31 @@ namespace {
     }
     return device_ids;
   }
+
+  int getDownscaleFromQuality(const std::string &quality)
+  {
+    char q='H';
+    if (quality.size() > 0)
+    {
+      q=quality[0];
+    }
+
+    switch (q)
+    {
+      case 'F':
+        return 1;
+
+      case 'M':
+        return 4;
+
+      case 'L':
+        return 6;
+
+      case 'H':
+      default:
+        return 2;
+    }
+  }
 }
 
 namespace rc
@@ -103,7 +132,8 @@ using rc_common_msgs::ReturnCodeConstants;
 
 ThreadedStream::Ptr DeviceNodelet::CreateDynamicsStreamOfType(rcd::RemoteInterface::Ptr rcdIface,
                                                               const std::string& stream, ros::NodeHandle& nh,
-                                                              const std::string& frame_id_prefix, bool tfEnabled)
+                                                              const std::string& frame_id_prefix, bool tfEnabled,
+                                                              bool staticImu2CamTf)
 {
   if (stream == "pose")
   {
@@ -115,7 +145,7 @@ ThreadedStream::Ptr DeviceNodelet::CreateDynamicsStreamOfType(rcd::RemoteInterfa
   }
   if (stream == "dynamics" || stream == "dynamics_ins")
   {
-    return ThreadedStream::Ptr(new DynamicsStream(rcdIface, stream, nh, frame_id_prefix));
+    return ThreadedStream::Ptr(new DynamicsStream(rcdIface, stream, nh, frame_id_prefix, !staticImu2CamTf));
   }
 
   throw std::runtime_error(std::string("Not yet implemented! Stream type: ") + stream);
@@ -125,6 +155,8 @@ DeviceNodelet::DeviceNodelet()
 {
   reconfig = 0;
   dev_supports_gain = false;
+  dev_supports_color = false;
+  dev_supports_chunk_data = false;
   dev_supports_wb = false;
   dev_supports_depth_acquisition_trigger = false;
   perform_depth_acquisition_trigger = false;
@@ -139,6 +171,7 @@ DeviceNodelet::DeviceNodelet()
   recoveryRequested = true;
   cntConsecutiveRecoveryFails = -1;  // first time not giving any warnings
   atLeastOnceSuccessfullyStarted = false;
+  totalCompleteBuffers = 0;
   totalIncompleteBuffers = 0;
   totalConnectionLosses = 0;
   totalImageReceiveTimeouts = 0;
@@ -398,6 +431,34 @@ void DeviceNodelet::keepAliveAndRecoverFromFails()
           }
         }
 
+        // get and publish static transform between IMU and camera (if feature available)
+
+        bool staticImu2CamTf = false;
+        try {
+          auto pbFrame = dynamicsInterface->getCam2ImuTransform();
+
+          // first prefix all frame ids
+          pbFrame.set_name(tfPrefix + pbFrame.name());
+          pbFrame.set_parent(tfPrefix + pbFrame.parent());
+
+          // invert cam2imu and convert to tf transform
+          auto imu2cam = tf::StampedTransform(
+                            toRosTfTransform(pbFrame.pose().pose()).inverse(),
+                            toRosTime(pbFrame.pose().timestamp()),
+                            pbFrame.name(), pbFrame.parent());
+          // send it
+          geometry_msgs::TransformStamped msg;
+          tf::transformStampedTFToMsg(imu2cam, msg);
+          tfStaticBroadcaster.sendTransform(msg);
+          staticImu2CamTf = true;
+
+        } catch (rcd::RemoteInterface::NotAvailable& e)
+        {
+          ROS_WARN_STREAM("rc_visard_driver: Could not get and publish static transformation between camera and IMU "
+                          << "because feature is not avilable in that rc_visard firmware version. Please update the firmware image "
+                          << "or subscribe to the dynamics topic to have that transformation available in tf.");
+        }
+
         // add streaming thread for each available stream on rc_visard device
 
         auto availStreams = dynamicsInterface->getAvailableStreams();
@@ -407,7 +468,7 @@ void DeviceNodelet::keepAliveAndRecoverFromFails()
           try
           {
             auto newStream =
-                CreateDynamicsStreamOfType(dynamicsInterface, streamName, getNodeHandle(), tfPrefix, tfEnabled);
+                CreateDynamicsStreamOfType(dynamicsInterface, streamName, getNodeHandle(), tfPrefix, tfEnabled, staticImu2CamTf);
             dynamicsStreams->add(newStream);
           }
           catch (const std::exception& e)
@@ -443,6 +504,7 @@ void DeviceNodelet::keepAliveAndRecoverFromFails()
       imageThread = std::thread(&DeviceNodelet::grab, this, device, access_id);
     }
     dynamicsStreams->start_all();
+
   }
 
   if (autostopDynamics)
@@ -469,6 +531,18 @@ void DeviceNodelet::initConfiguration(const std::shared_ptr<GenApi::CNodeMapRef>
 
   std::string v = rcg::getEnum(nodemap, "ExposureAuto", true);
   cfg.camera_exp_auto = (v != "Off");
+
+  if (cfg.camera_exp_auto)
+  {
+    if (v == "Continuous")
+    {
+      cfg.camera_exp_auto_mode = "Normal";
+    }
+    else
+    {
+      cfg.camera_exp_auto_mode = v;
+    }
+  }
 
   cfg.camera_exp_value = rcg::getFloat(nodemap, "ExposureTime", 0, 0, true) / 1000000;
   cfg.camera_exp_max = rcg::getFloat(nodemap, "ExposureTimeAutoMax", 0, 0, true) / 1000000;
@@ -504,10 +578,24 @@ void DeviceNodelet::initConfiguration(const std::shared_ptr<GenApi::CNodeMapRef>
     cfg.camera_gain_value = 0;
   }
 
+  // check if camera is color camera
+
+  std::vector<std::string> formats;
+  rcg::setEnum(rcgnodemap, "ComponentSelector", "Intensity", true);
+  rcg::getEnum(rcgnodemap, "PixelFormat", formats, true);
+  for (auto&& format : formats)
+  {
+    if (format == "YCbCr411_8")
+    {
+      dev_supports_color = true;
+      break;
+    }
+  }
+
   // get optional white balancing values (only for color camera)
 
   v = rcg::getEnum(nodemap, "BalanceWhiteAuto", false);
-  if (v.size() > 0)
+  if (dev_supports_color && v.size() > 0)
   {
     dev_supports_wb = true;
     cfg.camera_wb_auto = (v != "Off");
@@ -607,10 +695,6 @@ void DeviceNodelet::initConfiguration(const std::shared_ptr<GenApi::CNodeMapRef>
     {
       ROS_INFO("rc_visard_driver: License for iocontrol module not available, disabling out1_mode and out2_mode.");
     }
-
-    // enabling chunk data for getting the live line status
-
-    rcg::setBoolean(nodemap, "ChunkModeActive", iocontrol_avail, false);
   }
   catch (const std::exception&)
   {
@@ -622,11 +706,21 @@ void DeviceNodelet::initConfiguration(const std::shared_ptr<GenApi::CNodeMapRef>
     iocontrol_avail = false;
   }
 
+  // enabling chunk data for getting live camera/image parameters
+  // (e.g. line status, current gain and exposure, etc.)
+
+  dev_supports_chunk_data = rcg::setBoolean(nodemap, "ChunkModeActive", true, false);
+  if (!dev_supports_chunk_data)
+  {
+    ROS_WARN("rc_visard_driver: rc_visard has an older firmware that does not support chunk data.");
+
+  }
 
   // try to get ROS parameters: if parameter is not set in parameter server, default to current sensor configuration
 
   pnh.param("camera_fps", cfg.camera_fps, cfg.camera_fps);
   pnh.param("camera_exp_auto", cfg.camera_exp_auto, cfg.camera_exp_auto);
+  pnh.param("camera_exp_auto_mode", cfg.camera_exp_auto_mode, cfg.camera_exp_auto_mode);
   pnh.param("camera_exp_value", cfg.camera_exp_value, cfg.camera_exp_value);
   pnh.param("camera_gain_value", cfg.camera_gain_value, cfg.camera_gain_value);
   pnh.param("camera_exp_max", cfg.camera_exp_max, cfg.camera_exp_max);
@@ -657,6 +751,7 @@ void DeviceNodelet::initConfiguration(const std::shared_ptr<GenApi::CNodeMapRef>
 
   pnh.setParam("camera_fps", cfg.camera_fps);
   pnh.setParam("camera_exp_auto", cfg.camera_exp_auto);
+  pnh.setParam("camera_exp_auto_mode", cfg.camera_exp_auto_mode);
   pnh.setParam("camera_exp_value", cfg.camera_exp_value);
   pnh.setParam("camera_gain_value", cfg.camera_gain_value);
   pnh.setParam("camera_exp_max", cfg.camera_exp_max);
@@ -716,20 +811,7 @@ void DeviceNodelet::reconfigure(rc_visard_driver::rc_visard_driverConfig& c, uin
     l &= ~(16384 | 32768 | 65536);
   }
 
-  if (dev_supports_depth_acquisition_trigger)
-  {
-    c.depth_acquisition_mode = c.depth_acquisition_mode.substr(0, 1);
-
-    if (c.depth_acquisition_mode[0] == 'S')
-    {
-      c.depth_acquisition_mode = "SingleFrame";
-    }
-    else
-    {
-      c.depth_acquisition_mode = "Continuous";
-    }
-  }
-  else
+  if (!dev_supports_depth_acquisition_trigger)
   {
     c.depth_acquisition_mode = "Continuous";
     l &= ~1048576;
@@ -790,7 +872,14 @@ void DeviceNodelet::reconfigure(rc_visard_driver::rc_visard_driverConfig& c, uin
     {
       if (c.camera_exp_auto)
       {
-        rcg::setEnum(rcgnodemap, "ExposureAuto", "Continuous", true);
+        std::string mode = c.camera_exp_auto_mode;
+        if (mode == "Normal") mode = "Continuous";
+
+        if (!rcg::setEnum(rcgnodemap, "ExposureAuto", mode.c_str(), false))
+        {
+          c.camera_exp_auto_mode = "Normal";
+          rcg::setEnum(rcgnodemap, "ExposureAuto", "Continuous", true);
+        }
       }
       else
       {
@@ -926,7 +1015,7 @@ void setConfiguration(const std::shared_ptr<GenApi::CNodeMapRef>& nodemap,
         std::string val;
         for (size_t i = 0; i < list.size(); i++)
         {
-          if (list[i].compare(0, 1, cfg.depth_acquisition_mode, 0, 1) == 0)
+          if (list[i].compare(cfg.depth_acquisition_mode) == 0)
           {
             val = list[i];
           }
@@ -936,6 +1025,11 @@ void setConfiguration(const std::shared_ptr<GenApi::CNodeMapRef>& nodemap,
         {
           rcg::setEnum(nodemap, "DepthAcquisitionMode", val.c_str(), true);
         }
+        else
+        {
+          ROS_WARN_STREAM("DepthAcquisitionMode " << cfg.depth_acquisition_mode << " not supported by rc_visard");
+        }
+
       }
 
       if (lvl & 16)
@@ -1149,7 +1243,45 @@ int enable(const std::shared_ptr<GenApi::CNodeMapRef>& nodemap, const char* comp
 
   return 0;
 }
+
+rc_common_msgs::CameraParam extractChunkData(const std::shared_ptr<GenApi::CNodeMapRef>& rcgnodemap)
+{
+  rc_common_msgs::CameraParam cam_param;
+
+  // get list of all available IO lines and iterate over them to get their LineSource values
+  std::vector<std::string> lines;
+  rcg::getEnum(rcgnodemap, "ChunkLineSelector", lines, false);
+  for (auto&& line : lines)
+  {
+    rc_common_msgs::KeyValue line_source;
+    line_source.key = line;
+    rcg::setEnum(rcgnodemap, "ChunkLineSelector", line.c_str(), false);       // set respective selector
+    line_source.value = rcg::getEnum(rcgnodemap, "ChunkLineSource", false);   // get the actual source value
+    cam_param.line_source.push_back(line_source);
+  }
+
+  // get LineStatusAll
+  cam_param.line_status_all = rcg::getInteger(rcgnodemap, "ChunkLineStatusAll", 0, 0, false);
+
+  // get camera's exposure time and gain value
+  cam_param.gain = rcg::getFloat(rcgnodemap, "ChunkGain", 0, 0, false);
+  cam_param.exposure_time = rcg::getFloat(rcgnodemap, "ChunkExposureTime", 0, 0, false) / 1000000l;
+
+  // calculate camera's noise level
+  static float NOISE_BASE = 2.0;
+
+  rc_common_msgs::KeyValue kv;
+
+  kv.key="noise";
+  kv.value=std::to_string(static_cast<float>(NOISE_BASE * std::exp(cam_param.gain * std::log(10)/20)));
+
+  cam_param.extra_data.clear();
+  cam_param.extra_data.push_back(kv);
+
+  return cam_param;
 }
+
+} //anonymous namespace
 
 void DeviceNodelet::grab(std::string device, rcg::Device::ACCESS access)
 {
@@ -1230,14 +1362,13 @@ void DeviceNodelet::grab(std::string device, rcg::Device::ACCESS access)
 
       initConfiguration(rcgnodemap, config, access);
 
-      int disprange = config.depth_disprange;
+      int disprange = config.depth_disprange/getDownscaleFromQuality(config.depth_quality)*2;
       bool is_depth_acquisition_continuous = (config.depth_acquisition_mode[0] == 'C');
 
-      // prepare chunk adapter for getting chunk data, if iocontrol is available
+      // prepare chunk adapter for getting chunk data
 
       std::shared_ptr<GenApi::CChunkAdapter> chunkadapter;
-
-      if (iocontrol_avail)
+      if (dev_supports_chunk_data)
       {
         chunkadapter = rcg::getChunkAdapter(rcgnodemap, rcgdev->getTLType());
       }
@@ -1267,21 +1398,20 @@ void DeviceNodelet::grab(std::string device, rcg::Device::ACCESS access)
 
       std::shared_ptr<ImagePublisher> limage_color;
       std::shared_ptr<ImagePublisher> rimage_color;
-
+      if (dev_supports_color)
       {
-        std::vector<std::string> format;
-        rcg::setEnum(rcgnodemap, "ComponentSelector", "Intensity", true);
-        rcg::getEnum(rcgnodemap, "PixelFormat", format, true);
+        limage_color = std::make_shared<ImagePublisher>(it, tfPrefix, true, true, iocontrol_avail);
+        rimage_color = std::make_shared<ImagePublisher>(it, tfPrefix, false, true, iocontrol_avail);
+      }
 
-        for (size_t i = 0; i < format.size(); i++)
-        {
-          if (format[i] == "YCbCr411_8")
-          {
-            limage_color = std::make_shared<ImagePublisher>(it, tfPrefix, true, true, iocontrol_avail);
-            rimage_color = std::make_shared<ImagePublisher>(it, tfPrefix, false, true, iocontrol_avail);
-            break;
-          }
-        }
+      // add camera/image params publishers if the camera supports chunkdata
+
+      std::shared_ptr<CameraParamPublisher> lcamparams;
+      std::shared_ptr<CameraParamPublisher> rcamparams;
+      if (dev_supports_chunk_data)
+      {
+        lcamparams = std::make_shared<CameraParamPublisher>(nh, tfPrefix, true);
+        rcamparams = std::make_shared<CameraParamPublisher>(nh, tfPrefix, false);
       }
 
       // start streaming of first stream
@@ -1297,6 +1427,7 @@ void DeviceNodelet::grab(std::string device, rcg::Device::ACCESS access)
 
         // enter grabbing loop
         ros::SteadyTime tlastimage = ros::SteadyTime::now();
+        std::string out1_mode_on_sensor;
 
         while (!stopImageThread)
         {
@@ -1304,6 +1435,7 @@ void DeviceNodelet::grab(std::string device, rcg::Device::ACCESS access)
 
           if (buffer != 0 && !buffer->getIsIncomplete())
           {
+            totalCompleteBuffers++;
             if (gev_packet_size.size() == 0)
             {
               gev_packet_size = rcg::getString(rcgnodemap, "GevSCPSPacketSize", true, true);
@@ -1311,15 +1443,43 @@ void DeviceNodelet::grab(std::string device, rcg::Device::ACCESS access)
                               << gev_packet_size << ")");
             }
 
-            // get out1 line status from chunk data if possible
+            // get camera/image parameters (GenICam chunk data) if possible
+            // (e.g. out1_mode, line_status_all, current gain and exposure, etc.)
 
             bool out1 = false;
-            if (iocontrol_avail && chunkadapter && buffer->getContainsChunkdata())
+            if (chunkadapter && buffer->getContainsChunkdata())
             {
               chunkadapter->AttachBuffer(reinterpret_cast<std::uint8_t*>(buffer->getGlobalBase()),
                                                                          buffer->getSizeFilled());
-              out1 = (rcg::getInteger(rcgnodemap, "ChunkLineStatusAll", 0, 0, false) & 0x1);
+
+              // get current out1 mode
+              rcg::setEnum(rcgnodemap, "ChunkLineSelector", "Out1", false);
+              std::string v = rcg::getEnum(rcgnodemap, "ChunkLineSource", false);
+
+              if (v.size() > 0)
+              {
+                out1_mode_on_sensor = v;
+              }
             }
+
+            // if in alternate mode, then make publishers aware of it before
+            // publishing
+
+            bool alternate = (out1_mode_on_sensor == "ExposureAlternateActive");
+
+            limage.setOut1Alternate(alternate);
+            rimage.setOut1Alternate(alternate);
+            points2.setOut1Alternate(alternate);
+
+            if (limage_color && rimage_color)
+            {
+              limage_color->setOut1Alternate(alternate);
+              rimage_color->setOut1Alternate(alternate);
+            }
+
+            rc_common_msgs::CameraParam cam_param = extractChunkData(rcgnodemap);
+            cam_param.is_color_camera = dev_supports_color;
+            out1 = (cam_param.line_status_all & 0x1);
 
             uint32_t npart=buffer->getNumberOfParts();
             for (uint32_t part=0; part<npart; part++)
@@ -1341,6 +1501,12 @@ void DeviceNodelet::grab(std::string device, rcg::Device::ACCESS access)
                 lcaminfo.publish(buffer, part, pixelformat);
                 rcaminfo.publish(buffer, part, pixelformat);
 
+                if (lcamparams && rcamparams)
+                {
+                  lcamparams->publish(buffer, cam_param, pixelformat);
+                  rcamparams->publish(buffer, cam_param, pixelformat);
+                }
+
                 limage.publish(buffer, part, pixelformat, out1);
                 rimage.publish(buffer, part, pixelformat, out1);
 
@@ -1359,6 +1525,14 @@ void DeviceNodelet::grab(std::string device, rcg::Device::ACCESS access)
                 error_depth.publish(buffer, part, pixelformat);
 
                 points2.publish(buffer, part, pixelformat, out1);
+
+                // use out1_mode for updating dynamic parameters (below) only
+                // from buffers with intensity images
+
+                if (pixelformat != Mono8 && pixelformat != YCbCr411_8)
+                {
+                  out1_mode_on_sensor = "";
+                }
               }
             }
 
@@ -1397,6 +1571,12 @@ void DeviceNodelet::grab(std::string device, rcg::Device::ACCESS access)
 
               tlastimage = ros::SteadyTime::now();
             }
+
+            // get out1 mode from sensor (this is also used to check if the
+            // connection is still valid)
+
+            rcg::setEnum(rcgnodemap, "LineSelector", "Out1", true);
+            out1_mode_on_sensor = rcg::getString(rcgnodemap, "LineSource", true, true);
           }
 
           // trigger depth
@@ -1405,6 +1585,7 @@ void DeviceNodelet::grab(std::string device, rcg::Device::ACCESS access)
           {
             perform_depth_acquisition_trigger = false;
             rcg::callCommand(rcgnodemap, "DepthAcquisitionTrigger", true);
+            ROS_INFO("rc_visard_driver: Depth image acquisition triggered");
           }
 
           // determine what should be streamed, according to subscriptions to
@@ -1437,7 +1618,10 @@ void DeviceNodelet::grab(std::string device, rcg::Device::ACCESS access)
                                rimage.used() || (rimage_color && rimage_color->used()));
 
           changed += enable(rcgnodemap, "Intensity", cintensity,
-                            !cintensitycombined && (lcaminfo.used() || rcaminfo.used() || limage.used() ||
+                            !cintensitycombined && (lcaminfo.used() || rcaminfo.used() ||
+                                                    (lcamparams && lcamparams->used()) ||
+                                                    (rcamparams && rcamparams->used()) ||
+                                                    limage.used() ||
                                                     (limage_color && limage_color->used()) || points2.used()));
 
           changed += enable(rcgnodemap, "Disparity", cdisparity,
@@ -1459,7 +1643,7 @@ void DeviceNodelet::grab(std::string device, rcg::Device::ACCESS access)
             firstTime = false;
           }
 
-          // check if dynamic configuration hast changed
+          // check if dynamic configuration has changed
 
           if (level != 0)
           {
@@ -1473,24 +1657,7 @@ void DeviceNodelet::grab(std::string device, rcg::Device::ACCESS access)
 
             setConfiguration(rcgnodemap, cfg, lvl, iocontrol_avail);
 
-            disprange = cfg.depth_disprange;
-
-            // if in alternate mode, then make publishers aware of it
-
-            if (lvl & 262144)
-            {
-              bool alternate = (cfg.out1_mode == "ExposureAlternateActive");
-
-              limage.setOut1Alternate(alternate);
-              rimage.setOut1Alternate(alternate);
-              points2.setOut1Alternate(alternate);
-
-              if (limage_color && rimage_color)
-              {
-                limage_color->setOut1Alternate(alternate);
-                rimage_color->setOut1Alternate(alternate);
-              }
-            }
+            disprange = cfg.depth_disprange/getDownscaleFromQuality(cfg.depth_quality)*2;
 
             // if depth acquisition changed to continuous mode, reset last
             // grabbing time to avoid triggering timout if only disparity,
@@ -1506,6 +1673,24 @@ void DeviceNodelet::grab(std::string device, rcg::Device::ACCESS access)
               }
             }
           }
+
+          // update out1 mode, if it is different to current settings on sensor
+          // (which is the only GEV parameter which could have changed outside this code,
+          //  i.e. on the rc_visard by the stereomatching module)
+
+          mtx.lock();
+          if (out1_mode_on_sensor.size() == 0)
+          {
+            // use current settings if the value on the sensor cannot be determined
+            out1_mode_on_sensor = config.out1_mode;
+          }
+
+          if (out1_mode_on_sensor != config.out1_mode)
+          {
+            config.out1_mode = out1_mode_on_sensor;
+            reconfig->updateConfig(config);
+          }
+          mtx.unlock();
         }
 
         stream[0]->stopStreaming();
@@ -1553,6 +1738,7 @@ bool DeviceNodelet::depthAcquisitionTrigger(rc_common_msgs::Trigger::Request& re
 void DeviceNodelet::produce_connection_diagnostics(diagnostic_updater::DiagnosticStatusWrapper &stat)
 {
   stat.add("connection_loss_total", totalConnectionLosses);
+  stat.add("complete_buffers_total", totalCompleteBuffers);
   stat.add("incomplete_buffers_total", totalIncompleteBuffers);
   stat.add("image_receive_timeouts_total", totalImageReceiveTimeouts);
   stat.add("current_reconnect_trial", cntConsecutiveRecoveryFails);
