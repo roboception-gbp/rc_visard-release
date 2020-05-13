@@ -1,0 +1,15 @@
+ros-kinetic-rc-roi-manager-gui (3.0.0-1xenial) xenial; urgency=high
+
+  * fix typo in readme
+  * code format
+  * Contributors: Felix Ruess
+
+ -- Felix Ruess <felix.ruess@roboception.de>  Sun, 12 May 2019 22:00:00 -0000
+
+ros-kinetic-rc-roi-manager-gui (2.7.0-1xenial) xenial; urgency=high
+
+  * first release
+
+ -- Felix Ruess <felix.ruess@roboception.de>  Thu, 18 Jul 2019 22:00:00 -0000
+
+
