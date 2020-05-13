@@ -32,8 +32,8 @@ if (NOT USE_SYSTEM_CURL OR NOT CURL_FOUND)
   set(BUILD_TESTING OFF CACHE BOOL "Build testing tree")
 endif ()
 
-add_subdirectory(cpr)
+add_subdirectory(cpr EXCLUDE_FROM_ALL)
 
 # JSON dependency
 
-set(JSON_INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/json PARENT_SCOPE)
+set(JSON_INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR} PARENT_SCOPE)
