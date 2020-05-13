@@ -30,35 +30,33 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-
 #ifndef RC_PICK_CLIENT_BOXPICK_CLIENT_H
 #define RC_PICK_CLIENT_BOXPICK_CLIENT_H
 
 #include "pick_client.h"
 #include "rc_pick_client/ComputeBoxGrasps.h"
-#include "rc_pick_client/DetectBoxItems.h"
+#include "rc_pick_client/DetectItems.h"
 
 namespace ros_pick_client
 {
 class BoxpickClient : public PickClient
 {
-  public:
-    BoxpickClient(const std::string &host, const ros::NodeHandle &nh);
+public:
+  BoxpickClient(const std::string& host, const ros::NodeHandle& nh);
 
-    ~BoxpickClient() = default;
+  ~BoxpickClient() = default;
 
-  private:
-    bool computeGraspsSrv(rc_pick_client::ComputeBoxGraspsRequest &request,
-                          rc_pick_client::ComputeBoxGraspsResponse &response);
+private:
+  bool computeGraspsSrv(rc_pick_client::ComputeBoxGraspsRequest& request,
+                        rc_pick_client::ComputeBoxGraspsResponse& response);
 
-    bool detectItemsSrv(rc_pick_client::DetectBoxItemsRequest &request,
-                        rc_pick_client::DetectBoxItemsResponse &response);
+  bool detectItemsSrv(rc_pick_client::DetectItemsRequest& request, rc_pick_client::DetectItemsResponse& response);
 
-    void dynamicReconfigureCallback(rc_pick_client::pickModuleConfig &config, uint32_t);
+  void dynamicReconfigureCallback(rc_pick_client::pickModuleConfig& config, uint32_t);
 
-    ros::ServiceServer srv_detect_items_;
-    ros::ServiceServer srv_compute_grasps_;
+  ros::ServiceServer srv_detect_items_;
+  ros::ServiceServer srv_compute_grasps_;
 };
-}
+}  // namespace ros_pick_client
 
-#endif // RC_PICK_CLIENT_BOXPICK_CLIENT_H
+#endif  // RC_PICK_CLIENT_BOXPICK_CLIENT_H
