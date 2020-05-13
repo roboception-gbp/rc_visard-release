@@ -30,33 +30,39 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef RC_PICK_CLIENT_BOXPICK_CLIENT_H
-#define RC_PICK_CLIENT_BOXPICK_CLIENT_H
-
-#include "pick_client.h"
-#include "rc_pick_client/ComputeBoxGrasps.h"
-#include "rc_pick_client/DetectItems.h"
+#include "itempick_client.h"
 
 namespace ros_pick_client
 {
-class BoxpickClient : public PickClient
+ItempickClient::ItempickClient(const std::string& host, const ros::NodeHandle& nh) : PickClient(host, "rc_itempick", nh)
 {
-public:
-  BoxpickClient(const std::string& host, const ros::NodeHandle& nh);
+  srv_compute_grasps_ = nh_.advertiseService("compute_grasps", &ItempickClient::computeGraspsSrv, this);
+  server_->setCallback(boost::bind(&ItempickClient::dynamicReconfigureCallback, this, _1, _2));
+}
 
-  ~BoxpickClient() = default;
+bool ItempickClient::computeGraspsSrv(rc_pick_client::ComputeGraspsRequest& request,
+                                      rc_pick_client::ComputeGraspsResponse& response)
+{
+  callService("compute_grasps", request, response);
+  visualizer_.visualizeGrasps(response.grasps);
+  visualizer_.visualizeLoadCarriers(response.load_carriers);
+  return true;
+}
 
-private:
-  bool computeGraspsSrv(rc_pick_client::ComputeBoxGraspsRequest& request,
-                        rc_pick_client::ComputeBoxGraspsResponse& response);
+void ItempickClient::dynamicReconfigureCallback(rc_pick_client::pickModuleConfig& config, uint32_t)
+{
+  json js_params = createSharedParameters(config);
+  json js_param;
+  js_param["name"] = "cluster_max_dimension";
+  js_param["value"] = config.cluster_max_dimension;
+  js_params.push_back(js_param);
+  js_param["name"] = "clustering_patch_size";
+  js_param["value"] = config.clustering_patch_size;
+  js_params.push_back(js_param);
 
-  bool detectItemsSrv(rc_pick_client::DetectItemsRequest& request, rc_pick_client::DetectItemsResponse& response);
+  json j_params_new = rest_helper_.setParameters(js_params);
+  // set config with new params so they are updated if needed
+  paramsToCfg(j_params_new, config);
+}
 
-  void dynamicReconfigureCallback(rc_pick_client::pickModuleConfig& config, uint32_t);
-
-  ros::ServiceServer srv_detect_items_;
-  ros::ServiceServer srv_compute_grasps_;
-};
 }  // namespace ros_pick_client
-
-#endif  // RC_PICK_CLIENT_BOXPICK_CLIENT_H
