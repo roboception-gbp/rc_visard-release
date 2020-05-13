@@ -34,14 +34,39 @@ find_package(RCDISCOVER REQUIRED)
 ## Declare ROS messages, services and actions ##
 ################################################
 
-file(GLOB_RECURSE MSG_FILES RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}/msg" "msg/*.msg")
-file(GLOB_RECURSE SRV_FILES RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}/srv" "srv/*.srv")
-
 ## Generate messages in the 'msg' folder
-add_message_files(FILES ${MSG_FILES})
+add_message_files(FILES
+        Box.msg
+        CellFillingLevel.msg
+        CollisionDetection.msg
+        Compartment.msg
+        GridSize.msg
+        Item.msg
+        ItemModel.msg
+        LoadCarrier.msg
+        LoadCarrierWithFillingLevel.msg
+        RangeBox.msg
+        RangeRectangle.msg
+        RangeValue.msg
+        Rectangle.msg
+        RegionOfInterest.msg
+        SuctionGrasp.msg
+)
 
 # Generate services in the 'srv' folder
-add_service_files(FILES ${SRV_FILES})
+add_service_files(FILES
+        ComputeBoxGrasps.srv
+        ComputeGrasps.srv
+        DeleteLoadCarriers.srv
+        DeleteRegionsOfInterest.srv
+        DetectFillingLevel.srv
+        DetectItems.srv
+        DetectLoadCarriers.srv
+        GetLoadCarriers.srv
+        GetRegionsOfInterest.srv
+        SetLoadCarrier.srv
+        SetRegionOfInterest.srv
+)
 
 # Generate added messages and services with any dependencies listed here
 generate_messages(
@@ -87,12 +112,11 @@ include_directories(
 
 set(common_pick_src
         src/rc_pick_client_node.cpp
-        src/itempick_client.cc
-        src/boxpick_client.cc
-        src/communication_helper.cpp
+        src/itempick_client.cpp
+        src/boxpick_client.cpp
+        src/rest_helper.cpp
         src/visualization.cpp
-        src/pick_client.cc
-        src/utils.cpp
+        src/pick_client.cpp
         )
 
 add_executable(rc_itempick_client_node ${common_pick_src})

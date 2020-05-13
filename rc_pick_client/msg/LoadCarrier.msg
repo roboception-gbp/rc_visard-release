@@ -1,4 +1,4 @@
-# This represents a load carrier by its geometry and its pose in the pose_frame reference frame
+# This represents a load carrier by its geometry and its pose
 
 string id
 
@@ -12,3 +12,6 @@ Box inner_dimensions
 Rectangle rim_thickness
 
 geometry_msgs/PoseStamped pose
+
+# True if a detected load carrier is overfilled. Ignored on setting load carrier.
+bool overfilled
