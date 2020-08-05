@@ -1,8 +1,11 @@
-ROS client for Roboception's SilhouetteMatch module
-===================================================
+ROS interfaces for rc_visard
+============================
 
-This node provides ROS services and parameters for Roboception's SilhouetteMatch node.
-For a detailed description of the SilhouetteMatch module, check the rc_visard manual: https://doc.rc-visard.com/latest/en/silhouettematch.html.
+This repositorty contains ROS interfaces for the [Roboception rc_visard][] 3D sensor.
+
+Please also consult the manual for more details: https://doc.rc-visard.com
+
+The `rc_visard` ROS package is a convenience metapackage which depends on all others.
 
 Installation
 ------------
@@ -10,61 +13,55 @@ Installation
 On Debian/Ubuntu add the ROS sources and
 
 ```bash
-sudo apt-get install ros-${ROS_DISTRO}-rc-silhouettematch-client
+sudo apt-get install ros-${ROS_DISTRO}-rc-visard
 ```
 
-### From Source
+rc_visard_driver
+----------------
 
-This package relies on git submodules for the cpr library which need to be initialized before building from source.
+Nodelet/node providing a ROS interface to configure the rc_visard and receive
+images/poses.
 
-~~~bash
-git submodule update --init --recursive
-~~~
+See the [rc_visard_driver README](rc_visard_driver/README.md) for more details.
 
-Configuration
--------------
+rc_visard_description
+---------------------
 
-### Parameters
+Package with xacro and urdf files for rc_visard_65 and rc_visard_160
 
-* `device`: The ID of the device, i.e. Roboception rc_visard sensor. This can be either:
-  * serial number, e.g. `02912345`.
-    IMPORTANT: preceed with a colon (`:02912345`) when passing this on the command line or
-    setting it via rosparam (see https://github.com/ros/ros_comm/issues/1339).
-    This is not neccessary when specifying it as a string in a launch file.
-  * user defined name (factory default is the name of the rc_visard's model), must be unique among all
-    reachable sensors.
-* `host`: If `device` is not used: The IP address or hostname of the rc_visard.
+See the [rc_visard_description README](rc_visard_description/README.md) for more details.
 
-### Dynamic reconfigure parameters
+rc_hand_eye_calibration_client
+------------------------------
 
-* `max_number_of_detected_objects`: Maximum number of detected objects.
-* `edge_sensitivity`: Sensitivity of the edge detector.
-* `match_max_distance`: Maximum allowed distance in pixels between the template and the detected edges in the image.
-* `match_percentile`: Percentage of template pixels that must be within the maximum distance to successfully match the template.
-* `quality`: Detection quality (H(igh), M(edium), or L(ow)).
-* `publish_vis`: Whether TF and markers should be published.
+Package for calibrating the rc_visard to a robot.
+See the [rc_hand_eye_calibration_client README](rc_hand_eye_calibration_client/README.md) for more details.
 
+rc_pick_client
+--------------
 
-Services
---------
+ROS client for rc_visard's grasp generation modules.
+See the [rc_pick_client README](rc_pick_client/README.md) for more details.
 
-The following services are offered by the node:
+rc_tagdetect_client
+-------------------
 
-* `detect_object`: Triggers detection of an object.
-* `calibrate_base_plane`: Triggers base-plane calibration.
-* `get_base_plane_calibration`: Returns the configured base-plane calibration.
-* `delete_base_plane_calibration`: Deletes the configured base-plane calibration.
-* `set_region_of_interest`: Sets a region of interest.
-* `get_regions_of_interest`: Returns the configured regions of interest with the requested ids.
-  If no ids are provided, all configured regions of interest are returned.
-* `delete_regions_of_interest`: Deletes the configured regions of interest with the requested ids.
+ROS client for rc_visard's tag detection modules.
+See the [rc_tagdetect_client README](rc_tagdetect_client/README.md) for more details
 
+rc_silhouettematch_client
+-------------------------
 
-Launching
----------
+ROS client for rc_visard's SilhouetteMatch module.
+See the [rc_silhouettematch_client README](rc_silhouettematch_client/README.md) for more details
 
-Using command line parameters:
+Acknowledgements
+----------------
 
-~~~
-rosrun rc_silhouettematch_client rc_silhouettematch_client _device:=:<serial_number>
-~~~
+This FTP (Focused Technical Project) has received funding from the European Union’s Horizon 2020 research and innovation programme under the project ROSIN with the grant agreement No 732287.
+
+ROSIN: ROS-Industrial Quality-Assured Robot Software Components: http://rosin-project.eu
+
+![EU flag](rosin_eu_flag.jpg) ![ROSIN logo](rosin_ack_logo_wide.png)
+
+[Roboception rc_visard]: http://roboception.com/rc_visard
