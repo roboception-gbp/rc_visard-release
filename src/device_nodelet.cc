@@ -136,6 +136,7 @@ DeviceNodelet::DeviceNodelet()
   dev_supports_depth_acquisition_trigger = false;
   perform_depth_acquisition_trigger = false;
   iocontrol_avail = false;
+  dev_supports_double_shot = false;
   level = 0;
 
   stopImageThread = imageRequested = imageSuccess = false;
@@ -644,6 +645,17 @@ void DeviceNodelet::initConfiguration(const std::shared_ptr<GenApi::CNodeMapRef>
     stereo_plus_avail = false;
   }
 
+  try
+  {
+    cfg.depth_double_shot = rcg::getBoolean(nodemap, "DepthDoubleShot", true);
+    dev_supports_double_shot = true;
+  }
+  catch (const std::exception&)
+  {
+    dev_supports_double_shot = false;
+    ROS_WARN("rc_visard_driver: rc_visard has an older firmware, depth_double_shot is not available.");
+  }
+
   // check if io-control is available and get values
 
   try
@@ -707,6 +719,7 @@ void DeviceNodelet::initConfiguration(const std::shared_ptr<GenApi::CNodeMapRef>
   pnh.param("depth_acquisition_mode", cfg.depth_acquisition_mode, cfg.depth_acquisition_mode);
   pnh.param("depth_quality", cfg.depth_quality, cfg.depth_quality);
   pnh.param("depth_static_scene", cfg.depth_static_scene, cfg.depth_static_scene);
+  pnh.param("depth_double_shot", cfg.depth_double_shot, cfg.depth_double_shot);
   pnh.param("depth_seg", cfg.depth_seg, cfg.depth_seg);
   pnh.param("depth_smooth", cfg.depth_smooth, cfg.depth_smooth);
   pnh.param("depth_fill", cfg.depth_fill, cfg.depth_fill);
@@ -736,6 +749,7 @@ void DeviceNodelet::initConfiguration(const std::shared_ptr<GenApi::CNodeMapRef>
   pnh.setParam("depth_acquisition_mode", cfg.depth_acquisition_mode);
   pnh.setParam("depth_quality", cfg.depth_quality);
   pnh.setParam("depth_static_scene", cfg.depth_static_scene);
+  pnh.setParam("depth_double_shot", cfg.depth_double_shot);
   pnh.setParam("depth_seg", cfg.depth_seg);
   pnh.setParam("depth_smooth", cfg.depth_smooth);
   pnh.setParam("depth_fill", cfg.depth_fill);
@@ -768,6 +782,12 @@ void DeviceNodelet::reconfigure(rc_visard_driver::rc_visard_driverConfig& c, uin
   {
     c.camera_gain_value = 0;
     l &= ~8192;
+  }
+
+  if (!dev_supports_double_shot)
+  {
+    c.depth_double_shot = false;
+    l &= ~32;
   }
 
   c.camera_gain_value = round(c.camera_gain_value / 6) * 6;
@@ -898,6 +918,7 @@ void setConfiguration(const std::shared_ptr<GenApi::CNodeMapRef>& nodemap,
       {
         lvl &= ~1;
         rcg::setFloat(nodemap, "AcquisitionFrameRate", cfg.camera_fps, true);
+        ROS_DEBUG_STREAM("Set AcquisitionFrameRate to " << cfg.camera_fps);
       }
 
       // lvl 2 (camera_exp_auto) is immediately set in dynamic reconfigure callback
@@ -906,42 +927,49 @@ void setConfiguration(const std::shared_ptr<GenApi::CNodeMapRef>& nodemap,
       {
         lvl &= ~4;
         rcg::setFloat(nodemap, "ExposureTime", 1000000 * cfg.camera_exp_value, true);
+        ROS_DEBUG_STREAM("Set ExposureTime to " << cfg.camera_exp_value);
       }
 
       if (lvl & 8192)
       {
         lvl &= ~8192;
         rcg::setFloat(nodemap, "Gain", cfg.camera_gain_value, true);
+        ROS_DEBUG_STREAM("Set Gain to " << cfg.camera_gain_value);
       }
 
       if (lvl & 8)
       {
         lvl &= ~8;
         rcg::setFloat(nodemap, "ExposureTimeAutoMax", 1000000 * cfg.camera_exp_max, true);
+        ROS_DEBUG_STREAM("Set ExposureTimeAutoMax to " << cfg.camera_exp_max);
       }
 
       if (lvl & 8388608)
       {
         lvl &= ~8388608;
         rcg::setInteger(nodemap, "ExposureRegionWidth", cfg.camera_exp_width, false);
+        ROS_DEBUG_STREAM("Set ExposureRegionWidth to " << cfg.camera_exp_width);
       }
 
       if (lvl & 16777216)
       {
         lvl &= ~16777216;
         rcg::setInteger(nodemap, "ExposureRegionHeight", cfg.camera_exp_height, false);
+        ROS_DEBUG_STREAM("Set ExposureRegionHeight to " << cfg.camera_exp_height);
       }
 
       if (lvl & 33554432)
       {
         lvl &= ~33554432;
         rcg::setInteger(nodemap, "ExposureRegionOffsetX", cfg.camera_exp_offset_x, false);
+        ROS_DEBUG_STREAM("Set ExposureRegionOffsetX to " << cfg.camera_exp_offset_x);
       }
 
       if (lvl & 67108864)
       {
         lvl &= ~67108864;
         rcg::setInteger(nodemap, "ExposureRegionOffsetY", cfg.camera_exp_offset_y, false);
+        ROS_DEBUG_STREAM("Set ExposureRegionOffsetY to " << cfg.camera_exp_offset_y);
       }
 
       if (lvl & 16384)
@@ -951,10 +979,12 @@ void setConfiguration(const std::shared_ptr<GenApi::CNodeMapRef>& nodemap,
         if (cfg.camera_wb_auto)
         {
           rcg::setEnum(nodemap, "BalanceWhiteAuto", "Continuous", false);
+          ROS_DEBUG_STREAM("Set BalanceWhiteAuto to " << "Continuous");
         }
         else
         {
           rcg::setEnum(nodemap, "BalanceWhiteAuto", "Off", false);
+          ROS_DEBUG_STREAM("Set BalanceWhiteAuto to " << "Off");
         }
       }
 
@@ -964,6 +994,7 @@ void setConfiguration(const std::shared_ptr<GenApi::CNodeMapRef>& nodemap,
 
         rcg::setEnum(nodemap, "BalanceRatioSelector", "Red", false);
         rcg::setFloat(nodemap, "BalanceRatio", cfg.camera_wb_ratio_red, false);
+        ROS_DEBUG_STREAM("Set BalanceRatio Red to " << cfg.camera_wb_ratio_red);
       }
 
       if (lvl & 65536)
@@ -972,6 +1003,7 @@ void setConfiguration(const std::shared_ptr<GenApi::CNodeMapRef>& nodemap,
 
         rcg::setEnum(nodemap, "BalanceRatioSelector", "Blue", false);
         rcg::setFloat(nodemap, "BalanceRatio", cfg.camera_wb_ratio_blue, false);
+        ROS_DEBUG_STREAM("Set BalanceRatio Blue to " << cfg.camera_wb_ratio_blue);
       }
 
       if (lvl & 1048576)
@@ -993,6 +1025,7 @@ void setConfiguration(const std::shared_ptr<GenApi::CNodeMapRef>& nodemap,
         if (val.size() > 0)
         {
           rcg::setEnum(nodemap, "DepthAcquisitionMode", val.c_str(), true);
+          ROS_DEBUG_STREAM("Set DepthAcquisitionMode to " << val);
         }
         else
         {
@@ -1034,13 +1067,21 @@ void setConfiguration(const std::shared_ptr<GenApi::CNodeMapRef>& nodemap,
         if (val.size() > 0)
         {
           rcg::setEnum(nodemap, "DepthQuality", val.c_str(), true);
+          ROS_DEBUG_STREAM("Set DepthQuality to " << val);
         }
+      }
+
+      if (lvl & 32)
+      {
+        lvl &= ~32;
+        rcg::setBoolean(nodemap, "DepthDoubleShot", cfg.depth_double_shot, false);
+        ROS_DEBUG_STREAM("Set DepthDoubleShot to " << cfg.depth_double_shot);
       }
 
       if (lvl & 2097152)
       {
         lvl &= ~2097152;
-
+        ROS_DEBUG_STREAM("Set DepthStaticScene to " << cfg.depth_static_scene);
         if (!rcg::setBoolean(nodemap, "DepthStaticScene", cfg.depth_static_scene, false))
         {
           // support for rc_visard < 1.5
@@ -1067,6 +1108,7 @@ void setConfiguration(const std::shared_ptr<GenApi::CNodeMapRef>& nodemap,
           if (val.size() > 0)
           {
             rcg::setEnum(nodemap, "DepthQuality", val.c_str(), true);
+            ROS_DEBUG_STREAM("Set DepthQuality to " << val);
           }
         }
       }
@@ -1075,48 +1117,56 @@ void setConfiguration(const std::shared_ptr<GenApi::CNodeMapRef>& nodemap,
       {
         lvl &= ~64;
         rcg::setInteger(nodemap, "DepthSeg", cfg.depth_seg, true);
+        ROS_DEBUG_STREAM("Set DepthSeg to " << cfg.depth_seg);
       }
 
       if (lvl & 4194304)
       {
         lvl &= ~4194304;
         rcg::setBoolean(nodemap, "DepthSmooth", cfg.depth_smooth, false);
+        ROS_DEBUG_STREAM("Set DepthSmooth to " << cfg.depth_smooth);
       }
 
       if (lvl & 256)
       {
         lvl &= ~256;
         rcg::setInteger(nodemap, "DepthFill", cfg.depth_fill, true);
+        ROS_DEBUG_STREAM("Set DepthFill to " << cfg.depth_fill);
       }
 
       if (lvl & 512)
       {
         lvl &= ~512;
         rcg::setFloat(nodemap, "DepthMinConf", cfg.depth_minconf, true);
+        ROS_DEBUG_STREAM("Set DepthMinConf to " << cfg.depth_minconf);
       }
 
       if (lvl & 1024)
       {
         lvl &= ~1024;
         rcg::setFloat(nodemap, "DepthMinDepth", cfg.depth_mindepth, true);
+        ROS_DEBUG_STREAM("Set DepthMinDepth to " << cfg.depth_mindepth);
       }
 
       if (lvl & 2048)
       {
         lvl &= ~2048;
         rcg::setFloat(nodemap, "DepthMaxDepth", cfg.depth_maxdepth, true);
+        ROS_DEBUG_STREAM("Set DepthMaxDepth to " << cfg.depth_maxdepth);
       }
 
       if (lvl & 4096)
       {
         lvl &= ~4096;
         rcg::setFloat(nodemap, "DepthMaxDepthErr", cfg.depth_maxdeptherr, true);
+        ROS_DEBUG_STREAM("Set DepthMaxDepthErr to " << cfg.depth_maxdeptherr);
       }
 
       if (lvl & 131072)
       {
         lvl &= ~131072;
         rcg::setBoolean(nodemap, "GevIEEE1588", cfg.ptp_enabled, true);
+        ROS_DEBUG_STREAM("Set GevIEEE1588 to " << cfg.ptp_enabled);
       }
 
       if (lvl & 262144)
@@ -1127,6 +1177,7 @@ void setConfiguration(const std::shared_ptr<GenApi::CNodeMapRef>& nodemap,
         {
           rcg::setEnum(nodemap, "LineSelector", "Out1", true);
           rcg::setEnum(nodemap, "LineSource", cfg.out1_mode.c_str(), true);
+          ROS_DEBUG_STREAM("Set LineSource Out1 to " << cfg.out1_mode);
         }
       }
 
@@ -1138,6 +1189,7 @@ void setConfiguration(const std::shared_ptr<GenApi::CNodeMapRef>& nodemap,
         {
           rcg::setEnum(nodemap, "LineSelector", "Out2", true);
           rcg::setEnum(nodemap, "LineSource", cfg.out2_mode.c_str(), true);
+          ROS_DEBUG_STREAM("Set LineSource Out2 to " << cfg.out2_mode);
         }
       }
     }
@@ -1256,9 +1308,20 @@ rc_common_msgs::CameraParam extractChunkData(const std::shared_ptr<GenApi::CNode
 
   try
   {
+    std::string out1_reduction;
+    try
+    {
+      out1_reduction = std::to_string(rcg::getFloat(rcgnodemap, "ChunkRcOut1Reduction", 0, 0, true));
+    }
+    catch (const std::exception& e)
+    {
+      // try to fallback to older name in versions < 20.10.1
+      out1_reduction = std::to_string(rcg::getFloat(rcgnodemap, "ChunkRcAdaptiveOut1Reduction", 0, 0, true));
+    }
+
     rc_common_msgs::KeyValue kv;
-    kv.key = "adaptive_out1_reduction";
-    kv.value = std::to_string(rcg::getFloat(rcgnodemap, "ChunkRcAdaptiveOut1Reduction", 0, 0, true));
+    kv.key = "out1_reduction";
+    kv.value = out1_reduction;
     cam_param.extra_data.push_back(kv);
   }
   catch (std::invalid_argument& e)
@@ -1380,8 +1443,8 @@ void DeviceNodelet::grab(std::string device, rcg::Device::ACCESS access)
       CameraInfoPublisher lcaminfo(nh, tfPrefix, f, t, true);
       CameraInfoPublisher rcaminfo(nh, tfPrefix, f, t, false);
 
-      ImagePublisher limage(it, tfPrefix, true, false, iocontrol_avail);
-      ImagePublisher rimage(it, tfPrefix, false, false, iocontrol_avail);
+      ImagePublisher limage(it, tfPrefix, true, false, true);
+      ImagePublisher rimage(it, tfPrefix, false, false, true);
 
       DisparityPublisher disp(nh, tfPrefix, f, t, scale);
       DisparityColorPublisher cdisp(it, tfPrefix, f, t, scale);
@@ -1399,8 +1462,8 @@ void DeviceNodelet::grab(std::string device, rcg::Device::ACCESS access)
       std::shared_ptr<ImagePublisher> rimage_color;
       if (dev_supports_color)
       {
-        limage_color = std::make_shared<ImagePublisher>(it, tfPrefix, true, true, iocontrol_avail);
-        rimage_color = std::make_shared<ImagePublisher>(it, tfPrefix, false, true, iocontrol_avail);
+        limage_color = std::make_shared<ImagePublisher>(it, tfPrefix, true, true, true);
+        rimage_color = std::make_shared<ImagePublisher>(it, tfPrefix, false, true, true);
       }
 
       // add camera/image params publishers if the camera supports chunkdata
@@ -1465,17 +1528,7 @@ void DeviceNodelet::grab(std::string device, rcg::Device::ACCESS access)
             // publishing
 
             bool out1_alternate = (out1_mode_on_sensor == "ExposureAlternateActive");
-            bool out1_low = (out1_mode_on_sensor == "Low");
-
-            limage.setOut1OnlyLow(out1_alternate || out1_low);
-            rimage.setOut1OnlyLow(out1_alternate || out1_low);
             points2.setOut1Alternate(out1_alternate);
-
-            if (limage_color && rimage_color)
-            {
-              limage_color->setOut1OnlyLow(out1_alternate || out1_low);
-              rimage_color->setOut1OnlyLow(out1_alternate || out1_low);
-            }
 
             rc_common_msgs::CameraParam cam_param = extractChunkData(rcgnodemap);
             cam_param.is_color_camera = dev_supports_color;
