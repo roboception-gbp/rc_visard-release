@@ -1,0 +1,12 @@
+Source: ros-noetic-rc-roi-manager-gui
+Section: misc
+Priority: optional
+Maintainer: Felix Ruess <felix.ruess@roboception.de>
+Build-Depends: debhelper (>= 9.0.0), libwxgtk3.0-dev, ros-noetic-catkin, ros-noetic-geometry-msgs, ros-noetic-interactive-markers, ros-noetic-rc-common-msgs, ros-noetic-rc-pick-client, ros-noetic-roscpp, ros-noetic-shape-msgs, ros-noetic-tf, ros-noetic-visualization-msgs
+Homepage: http://wiki.ros.org/rc_roi_manager_gui
+Standards-Version: 3.9.2
+
+Package: ros-noetic-rc-roi-manager-gui
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, libwxgtk3.0-dev, ros-noetic-geometry-msgs, ros-noetic-interactive-markers, ros-noetic-message-runtime, ros-noetic-rc-common-msgs, ros-noetic-rc-pick-client, ros-noetic-roscpp, ros-noetic-shape-msgs, ros-noetic-tf, ros-noetic-visualization-msgs
+Description: The ros client for the region of interest manager of the itempick and boxpick modules
