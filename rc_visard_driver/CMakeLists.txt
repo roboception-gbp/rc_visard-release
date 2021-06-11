@@ -11,7 +11,7 @@ endif ()
 
 # - Standard definitions -
 
-if (CMAKE_MAJOR_VERSION VERSION_LESS "3.1.0")
+if (CMAKE_VERSION VERSION_LESS "3.1.0")
   add_definitions(-std=c++11)
 else ()
   set(CMAKE_CXX_STANDARD 11)
@@ -19,9 +19,6 @@ endif ()
 add_definitions(-Wall)
 add_definitions(-Wno-unknown-pragmas)
 
-# add a target to generate API documentation with Doxygen
-
-add_subdirectory(doc)
 
 ## Find catkin macros and libraries
 ## if COMPONENTS list like find_package(catkin REQUIRED COMPONENTS xyz)
