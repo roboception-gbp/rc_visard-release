@@ -2,6 +2,16 @@
 Changelog for package rc_visard_driver
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+3.2.1 (2021-02-11)
+------------------
+* Only checking for rc_visard as model and not for vendor when detecting devices
+
+3.2.0 (2021-01-28)
+------------------
+* update cmake files for better version handling
+* set out1_mode immediately in reconfigure callback to avoid race condition
+* default out1_mode is Low
+
 3.1.0 (2020-11-17)
 ------------------
 
@@ -9,8 +19,8 @@ Changelog for package rc_visard_driver
 * Change: always publish *_out1_low and *_out1_high topics even if no iocontrol license is available
 * debug messages when GenICam params are changed
 * rename adaptive_out1_reduction to out1_reduction
-* add Out1High camera_exp_auto_mode (requires rc_visard firmware <= 20.10.1)
-* add depth_double_shot parameter (requires rc_visard firmware <= 20.10.1)
+* add Out1High camera_exp_auto_mode (requires rc_visard firmware >= 20.11.0)
+* add depth_double_shot parameter (requires rc_visard firmware >= 20.11.0)
 
 3.0.5 (2020-10-20)
 ------------------
