@@ -1,1 +1,1 @@
-{"trim": "", "base": "00d2d4b7", "trimbase": "", "parent": "debian/noetic/rc_visard_description", "previous": "1ac63075"}
+{"base": "55f82ca2", "parent": "debian/noetic/rc_visard_description", "previous": "482303c0", "trim": "", "trimbase": ""}
