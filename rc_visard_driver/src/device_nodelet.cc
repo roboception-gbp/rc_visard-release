@@ -137,6 +137,7 @@ DeviceNodelet::DeviceNodelet()
   perform_depth_acquisition_trigger = false;
   iocontrol_avail = false;
   dev_supports_double_shot = false;
+  dev_supports_depth_exposure_adapt_timeout = false;
   level = 0;
 
   stopImageThread = imageRequested = imageSuccess = false;
@@ -709,6 +710,17 @@ void DeviceNodelet::initConfiguration(const std::shared_ptr<GenApi::CNodeMapRef>
 
   }
 
+  try
+  {
+    cfg.depth_exposure_adapt_timeout = rcg::getFloat(nodemap, "DepthExposureAdaptTimeout", 0, 0, true);
+    dev_supports_depth_exposure_adapt_timeout = true;
+  }
+  catch (const std::exception&)
+  {
+    dev_supports_depth_exposure_adapt_timeout = false;
+    NODELET_WARN("rc_visard_driver: rc_visard has an older firmware, depth_exposure_adapt_timeout is not available.");
+  }
+
   // try to get ROS parameters: if parameter is not set in parameter server, default to current sensor configuration
 
   pnh.param("camera_fps", cfg.camera_fps, cfg.camera_fps);
@@ -735,6 +747,7 @@ void DeviceNodelet::initConfiguration(const std::shared_ptr<GenApi::CNodeMapRef>
   pnh.param("depth_mindepth", cfg.depth_mindepth, cfg.depth_mindepth);
   pnh.param("depth_maxdepth", cfg.depth_maxdepth, cfg.depth_maxdepth);
   pnh.param("depth_maxdeptherr", cfg.depth_maxdeptherr, cfg.depth_maxdeptherr);
+  pnh.param("depth_exposure_adapt_timeout", cfg.depth_exposure_adapt_timeout, cfg.depth_exposure_adapt_timeout);
   pnh.param("ptp_enabled", cfg.ptp_enabled, cfg.ptp_enabled);
   pnh.param("out1_mode", cfg.out1_mode, cfg.out1_mode);
   pnh.param("out2_mode", cfg.out2_mode, cfg.out2_mode);
@@ -765,6 +778,7 @@ void DeviceNodelet::initConfiguration(const std::shared_ptr<GenApi::CNodeMapRef>
   pnh.setParam("depth_mindepth", cfg.depth_mindepth);
   pnh.setParam("depth_maxdepth", cfg.depth_maxdepth);
   pnh.setParam("depth_maxdeptherr", cfg.depth_maxdeptherr);
+  pnh.setParam("depth_exposure_adapt_timeout", cfg.depth_exposure_adapt_timeout);
   pnh.setParam("ptp_enabled", cfg.ptp_enabled);
   pnh.setParam("out1_mode", cfg.out1_mode);
   pnh.setParam("out2_mode", cfg.out2_mode);
@@ -855,6 +869,12 @@ void DeviceNodelet::reconfigure(rc_visard_driver::rc_visard_driverConfig& c, uin
   {
     c.out1_mode = "Low";
     c.out2_mode = "Low";
+  }
+
+  if (!dev_supports_depth_exposure_adapt_timeout)
+  {
+    c.depth_exposure_adapt_timeout = 0.0;
+    l &= ~268435456;
   }
 
   // if out1_mode or out2_mode are changed, immediately set new value here
@@ -1196,6 +1216,13 @@ void setConfiguration(const std::shared_ptr<GenApi::CNodeMapRef>& nodemap,
         ROS_DEBUG_STREAM("Set DepthMaxDepthErr to " << cfg.depth_maxdeptherr);
       }
 
+      if (lvl & 268435456)
+      {
+        lvl &= ~268435456;
+        rcg::setFloat(nodemap, "DepthExposureAdaptTimeout", cfg.depth_exposure_adapt_timeout, false);
+        ROS_DEBUG_STREAM("Set DepthExposureAdaptTimeout to " << cfg.depth_exposure_adapt_timeout);
+      }
+
       if (lvl & 131072)
       {
         lvl &= ~131072;
@@ -1267,21 +1294,66 @@ int enable(const std::shared_ptr<GenApi::CNodeMapRef>& nodemap, const char* comp
   return 0;
 }
 
+namespace
+{
+template <class T>
+inline rc_common_msgs::KeyValue getKeyValue(const char* key, T value)
+{
+  rc_common_msgs::KeyValue ret;
+
+  ret.key = key;
+  ret.value = std::to_string(value);
+
+  return ret;
+}
+
+inline rc_common_msgs::KeyValue getKeyValueString(const char* key, const std::string& value)
+{
+  rc_common_msgs::KeyValue ret;
+
+  ret.key = key;
+  ret.value = value;
+
+  return ret;
+}
+
+}  // namespace
+
 rc_common_msgs::CameraParam extractChunkData(const std::shared_ptr<GenApi::CNodeMapRef>& rcgnodemap)
 {
   rc_common_msgs::CameraParam cam_param;
 
-  // get list of all available IO lines and iterate over them to get their LineSource values
+  // get list of all available IO lines and iterate over them
+  // to get input/output masks and LineSource values for outputs
+
   std::vector<std::string> lines;
-  rcg::getEnum(rcgnodemap, "ChunkLineSelector", lines, false);
-  for (auto&& line : lines)
+  rcg::getEnum(rcgnodemap, "LineSelector", lines, true);
+  uint32_t input_mask = 0;
+  uint32_t output_mask = 0;
+  for (size_t i = 0; i < lines.size(); i++)
   {
-    rc_common_msgs::KeyValue line_source;
-    line_source.key = line;
-    rcg::setEnum(rcgnodemap, "ChunkLineSelector", line.c_str(), false);       // set respective selector
-    line_source.value = rcg::getEnum(rcgnodemap, "ChunkLineSource", false);   // get the actual source value
-    cam_param.line_source.push_back(line_source);
+    rcg::setEnum(rcgnodemap, "LineSelector", lines[i].c_str(), true);
+    std::string io = rcg::getEnum(rcgnodemap, "LineMode");
+
+    if (io == "Input")
+    {
+      input_mask |= 1 << i;
+    }
+
+    if (io == "Output")
+    {
+      output_mask |= 1 << i;
+
+      // for output also get LineSource for this image
+      rcg::setEnum(rcgnodemap, "ChunkLineSelector", lines[i].c_str(), true);
+      rc_common_msgs::KeyValue line_source;
+      line_source.key = lines[i];
+      line_source.value = rcg::getEnum(rcgnodemap, "ChunkLineSource", true);
+      cam_param.line_source.push_back(line_source);
+    }
   }
+  cam_param.extra_data.push_back(getKeyValue("input_mask", input_mask));
+  cam_param.extra_data.push_back(getKeyValue("output_mask", output_mask));
 
   // get LineStatusAll
   cam_param.line_status_all = rcg::getInteger(rcgnodemap, "ChunkLineStatusAll", 0, 0, false);
@@ -1291,67 +1363,69 @@ rc_common_msgs::CameraParam extractChunkData(const std::shared_ptr<GenApi::CNode
   cam_param.exposure_time = rcg::getFloat(rcgnodemap, "ChunkExposureTime", 0, 0, false) / 1000000l;
 
   // add extra data
-  cam_param.extra_data.clear();
   try
   {
-    rc_common_msgs::KeyValue kv;
-    kv.key = "noise";
-    kv.value = std::to_string(rcg::getFloat(rcgnodemap, "ChunkRcNoise", 0, 0, true));
-    cam_param.extra_data.push_back(kv);
+    float noise = rcg::getFloat(rcgnodemap, "ChunkRcNoise", 0, 0, true);
+    cam_param.extra_data.push_back(getKeyValue("noise", noise));
   }
-  catch (std::invalid_argument& e)
+  catch (std::invalid_argument&)
   {
     // calculate camera's noise level
     static float NOISE_BASE = 2.0;
-    rc_common_msgs::KeyValue kv;
-    kv.key = "noise";
-    kv.value = std::to_string(static_cast<float>(NOISE_BASE * std::exp(cam_param.gain * std::log(10)/20)));
-    cam_param.extra_data.push_back(kv);
+    float noise = static_cast<float>(NOISE_BASE * std::exp(cam_param.gain * std::log(10)/20));
+    cam_param.extra_data.push_back(getKeyValue("noise", noise));
   }
 
   try
   {
-    rc_common_msgs::KeyValue kv;
-    kv.key = "test";
-    kv.value = std::to_string(rcg::getBoolean(rcgnodemap, "ChunkRcTest", true));
-    cam_param.extra_data.push_back(kv);
+    bool test = rcg::getBoolean(rcgnodemap, "ChunkRcTest", true);
+    cam_param.extra_data.push_back(getKeyValue("test", test));
   }
-  catch (std::invalid_argument& e)
+  catch (std::invalid_argument&)
   {
+    // feature not available on device
   }
 
   try
   {
-    std::string out1_reduction;
+    float out1_reduction;
     try
     {
-      out1_reduction = std::to_string(rcg::getFloat(rcgnodemap, "ChunkRcOut1Reduction", 0, 0, true));
+      out1_reduction = rcg::getFloat(rcgnodemap, "ChunkRcOut1Reduction", 0, 0, true);
     }
-    catch (const std::exception& e)
+    catch (const std::exception&)
     {
       // try to fallback to older name in versions < 20.10.1
-      out1_reduction = std::to_string(rcg::getFloat(rcgnodemap, "ChunkRcAdaptiveOut1Reduction", 0, 0, true));
+      out1_reduction = rcg::getFloat(rcgnodemap, "ChunkRcAdaptiveOut1Reduction", 0, 0, true);
     }
-
-    rc_common_msgs::KeyValue kv;
-    kv.key = "out1_reduction";
-    kv.value = out1_reduction;
-    cam_param.extra_data.push_back(kv);
+    cam_param.extra_data.push_back(getKeyValue("out1_reduction", out1_reduction));
   }
-  catch (std::invalid_argument& e)
+  catch (std::invalid_argument&)
   {
+    // feature not available on device
   }
 
   try
   {
-    rc_common_msgs::KeyValue kv;
-    kv.key = "brightness";
-    kv.value = std::to_string(rcg::getFloat(rcgnodemap, "ChunkRcBrightness", 0, 0, true));
-    cam_param.extra_data.push_back(kv);
+    float brightness = rcg::getFloat(rcgnodemap, "ChunkRcBrightness", 0, 0, true);
+    cam_param.extra_data.push_back(getKeyValue("brightness", brightness));
   }
-  catch (std::invalid_argument& e)
+  catch (std::invalid_argument&)
   {
+    // feature not available on device
   }
+
+  try
+  {
+    bool adapting = rcg::getBoolean(rcgnodemap, "ChunkRcAutoExposureAdapting", true);
+    cam_param.extra_data.push_back(getKeyValue("auto_exposure_adapting", adapting));
+  }
+  catch (const std::exception&)
+  {
+    // feature not available on device
+  }
+
+  cam_param.extra_data.push_back(getKeyValueString("model_name", rcg::getString(rcgnodemap, "DeviceModelName")));
 
   return cam_param;
 }
