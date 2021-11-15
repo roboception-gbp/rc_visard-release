@@ -1,3 +1,34 @@
+## rc_visard (noetic) - 3.2.4-1
+
+The packages in the `rc_visard` repository were released into the `noetic` distro by running `/usr/bin/bloom-release --ros-distro noetic rc_visard` on `Mon, 15 Nov 2021 12:24:53 -0000`
+
+These packages were released:
+- `rc_hand_eye_calibration_client`
+- `rc_pick_client`
+- `rc_roi_manager_gui`
+- `rc_silhouettematch_client`
+- `rc_tagdetect_client`
+- `rc_visard`
+- `rc_visard_description`
+- `rc_visard_driver`
+
+Version of package(s) in repository `rc_visard`:
+
+- upstream repository: https://github.com/roboception/rc_visard_ros.git
+- release repository: https://github.com/roboception-gbp/rc_visard-release.git
+- rosdistro version: `3.2.3-1`
+- old version: `3.2.3-1`
+- new version: `3.2.4-1`
+
+Versions of tools used:
+
+- bloom version: `0.10.7`
+- catkin_pkg version: `0.4.24`
+- rosdep version: `0.21.0`
+- rosdistro version: `0.8.3`
+- vcstools version: `0.1.42`
+
+
 ## rc_visard (melodic) - 3.2.4-1
 
 The packages in the `rc_visard` repository were released into the `melodic` distro by running `/usr/bin/bloom-release --ros-distro melodic rc_visard` on `Mon, 15 Nov 2021 12:11:41 -0000`
