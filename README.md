@@ -1,89 +1,34 @@
-ROS interfaces for rc_visard
-============================
-
-This repositorty contains ROS interfaces for the [Roboception rc_visard][] 3D sensor.
-
-Please also consult the manual for more details: https://doc.rc-visard.com
-
-**This stack is mostly in maintenance mode!** Please consider migrating to
-
-* [rc_genicam_driver for ROS1](https://github.com/roboception/rc_genicam_driver_ros)
-* [rc_genicam_driver for ROS2](https://github.com/roboception/rc_genicam_driver_ros2)
-* [rc_reason_clients for ROS1](https://github.com/roboception/rc_reason_clients_ros)
-* [rc_reason_clients for ROS2](https://github.com/roboception/rc_reason_clients_ros2)
-
-Installation
-------------
-
-On Debian/Ubuntu add the ROS sources and
-
-```bash
-sudo apt-get install ros-${ROS_DISTRO}-rc-visard
-```
-
-rc_visard
----------
-
-The `rc_visard` ROS package is a convenience metapackage which depends on all others.
-
-rc_visard_driver
-----------------
-
-Nodelet/node providing a ROS interface to configure the rc_visard and receive
-images/poses.
-
-See the [rc_visard_driver README](rc_visard_driver/README.md) for more details.
 
 rc_visard_description
----------------------
+=====================
 
 Package with xacro and urdf files for rc_visard_65 and rc_visard_160
 
-See the [rc_visard_description README](rc_visard_description/README.md) for more details.
+Build/Installation
+------------------
 
-rc_hand_eye_calibration_client
-------------------------------
+See the [main README](../README.md)
 
-**This package is not developed anymore**. A new client is available in the
-[rc_reason_clients_ros repository](https://github.com/roboception/rc_reason_clients_ros/tree/master/rc_reason_clients#rc_hand_eye_calibration_client).
+Usage
+-----
 
-Package for calibrating the rc_visard to a robot.
-See the [rc_hand_eye_calibration_client README](rc_hand_eye_calibration_client/README.md) for more details.
+When the position of the sensor depends on the /camera frame (position from IMU or SLAM) rc_visard_65_standalone.urdf or rc_visard_160_standalone.urdf can be used for visualization.
 
-rc_pick_client
+When the sensor is mounted on the robot or staticaly mounted in the scene rc_visard_65.xacro or rc_visard_160.xacro can be used to include the sensor in the urdf.xacro files.
+
+
+Model accuracy
 --------------
 
-**This package is not developed anymore**. New clients are available in the
-[rc_reason_clients_ros repository](https://github.com/roboception/rc_reason_clients_ros/tree/master/rc_reason_clients#rc_itempick_client).
+The position of the camera frame of the model can be different than the position of this frame in real sensor. The position can vary up to +/- 3 mm in z axis.
+The inertia of the real rc_visard can be different up to +/- 5% compared to data in urdf file.
 
-ROS client for rc_visard's ItemPick and BoxPick modules.
-See the [rc_pick_client README](rc_pick_client/README.md) for more details.
+Simulation
+----------
 
-rc_tagdetect_client
--------------------
+The bahaviour of gazebo model of the sensor and real sensor are slightly different.
+Depth data provided by the Gazebo model is created with openni kinect plugin, therefore no disparity, confidence and error data is published.
+Moreover Gazebo does not publish the dynamics state of the sensor except IMU data.
+Also the /imu topic published by Gazebo plugin does not include gravity in the acceleration and has the orientation part which is not provided by the rc_visard.
 
-**This package is not developed anymore**. New clients are available in the
-[rc_reason_clients_ros repository](https://github.com/roboception/rc_reason_clients_ros/tree/master/rc_reason_clients#rc_april_tag_detect_client-and-rc_qr_code_detect_client).
-
-ROS client for rc_visard's tag detection modules.
-See the [rc_tagdetect_client README](rc_tagdetect_client/README.md) for more details
-
-rc_silhouettematch_client
--------------------------
-
-**This package is not developed anymore**. A new client is available in the
-[rc_reason_clients_ros repository](https://github.com/roboception/rc_reason_clients_ros/tree/master/rc_reason_clients#rc_silhouettematch_client).
-
-ROS client for rc_visard's SilhouetteMatch module.
-See the [rc_silhouettematch_client README](rc_silhouettematch_client/README.md) for more details
-
-Acknowledgements
-----------------
-
-This FTP (Focused Technical Project) has received funding from the European Union’s Horizon 2020 research and innovation programme under the project ROSIN with the grant agreement No 732287.
-
-ROSIN: ROS-Industrial Quality-Assured Robot Software Components: http://rosin-project.eu
-
-![EU flag](rosin_eu_flag.jpg) ![ROSIN logo](rosin_ack_logo_wide.png)
-
-[Roboception rc_visard]: http://roboception.com/rc_visard
+The simulation model works with Gazebo 2.X.
