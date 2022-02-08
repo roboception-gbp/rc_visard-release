@@ -1,0 +1,12 @@
+Source: ros-noetic-rc-visard
+Section: misc
+Priority: optional
+Maintainer: Felix Ruess <felix.ruess@roboception.de>
+Build-Depends: debhelper (>= 9.0.0), ros-noetic-catkin
+Homepage: http://roboception.com/rc_visard
+Standards-Version: 3.9.2
+
+Package: ros-noetic-rc-visard
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, ros-noetic-rc-hand-eye-calibration-client, ros-noetic-rc-pick-client, ros-noetic-rc-silhouettematch-client, ros-noetic-rc-tagdetect-client, ros-noetic-rc-visard-description, ros-noetic-rc-visard-driver
+Description: Roboception rc_visard support meta package
