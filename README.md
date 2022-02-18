@@ -1,16 +1,11 @@
-ROS interfaces for rc_visard
-============================
+ROS client for Roboception's ItemPick and BoxPick modules
+=========================================================
 
-This repositorty contains ROS interfaces for the [Roboception rc_visard][] 3D sensor.
+**This package is not developed anymore**. New clients are available in the
+[rc_reason_clients_ros repository](https://github.com/roboception/rc_reason_clients_ros/tree/master/rc_reason_clients#rc_itempick_client).
 
-Please also consult the manual for more details: https://doc.rc-visard.com
-
-**This stack is mostly in maintenance mode!** Please consider migrating to
-
-* [rc_genicam_driver for ROS1](https://github.com/roboception/rc_genicam_driver_ros)
-* [rc_genicam_driver for ROS2](https://github.com/roboception/rc_genicam_driver_ros2)
-* [rc_reason_clients for ROS1](https://github.com/roboception/rc_reason_clients_ros)
-* [rc_reason_clients for ROS2](https://github.com/roboception/rc_reason_clients_ros2)
+This node provides ROS service calls and parameters for ItemPick node.
+For detail description of the ItemPick module check rc_visard manual: https://doc.rc-visard.com/latest/en/itempick.html
 
 Installation
 ------------
@@ -18,72 +13,65 @@ Installation
 On Debian/Ubuntu add the ROS sources and
 
 ```bash
-sudo apt-get install ros-${ROS_DISTRO}-rc-visard
+sudo apt-get install ros-${ROS_DISTRO}-rc-pick-client
 ```
 
-rc_visard
----------
+### From Source
 
-The `rc_visard` ROS package is a convenience metapackage which depends on all others.
+This package relies on git submodules for the cpr library which need to be initialized before building from source.
 
-rc_visard_driver
-----------------
+~~~bash
+git submodule update --init --recursive
+~~~
 
-Nodelet/node providing a ROS interface to configure the rc_visard and receive
-images/poses.
+Configuration
+-------------
 
-See the [rc_visard_driver README](rc_visard_driver/README.md) for more details.
+### Parameters
 
-rc_visard_description
----------------------
+* `device`: The ID of the device, i.e. Roboception rc_visard sensor. This can be either:
+  * serial number, e.g. `02912345`.
+    IMPORTANT: preceed with a colon (`:02912345`) when passing this on the commandline or
+    setting it via rosparam (see https://github.com/ros/ros_comm/issues/1339).
+    This is not neccessary when specifying it as a string in a launch file.
+  * user defined name (factory default is the name of the rc_visard's model), must be unique among all
+    reachable sensors.
+* `host`: If `device` is not used: The IP address or hostname of the rc_visard
 
-Package with xacro and urdf files for rc_visard_65 and rc_visard_160
+### Dynamic reconfigure parameters
 
-See the [rc_visard_description README](rc_visard_description/README.md) for more details.
+* `cluster_max_dimension`: Indicates how much the estimated load carrier dimensions are allowed to differ from the load carrier model dimensions in meters
+* `cluster_max_curvature`: Maximum curvature allowed within one cluster. The smaller this value, the more clusters will be split apart.
+* `clustering_patch_size`: Size in pixels of the square patches the depth map is subdivided into during the first clustering step
+* `clustering_max_surface_rmse`: Maximum root-mean-square error (RMSE) in meters of points belonging to a surface
+* `clustering_discontinuity_factor`: Factor used to discriminate depth discontinuities within a patch. The smaller this value, the more clusters will be split apart.
+* `max_grasps`: Maximum number of provided grasps.
 
-rc_hand_eye_calibration_client
-------------------------------
+Services
+--------
 
-**This package is not developed anymore**. A new client is available in the
-[rc_reason_clients_ros repository](https://github.com/roboception/rc_reason_clients_ros/tree/master/rc_reason_clients#rc_hand_eye_calibration_client).
+The following services are offered by the node:
 
-Package for calibrating the rc_visard to a robot.
-See the [rc_hand_eye_calibration_client README](rc_hand_eye_calibration_client/README.md) for more details.
+* `compute_grasps`: Triggers the computation of grasping poses for a suction device. All images used by the node are guaranteed to be newer than the service trigger time.
 
-rc_pick_client
---------------
+For the BoxPick node, an additional service is offered:
 
-**This package is not developed anymore**. New clients are available in the
-[rc_reason_clients_ros repository](https://github.com/roboception/rc_reason_clients_ros/tree/master/rc_reason_clients#rc_itempick_client).
+* `detect_items`: Triggers the detection of rectangles.
 
-ROS client for rc_visard's ItemPick and BoxPick modules.
-See the [rc_pick_client README](rc_pick_client/README.md) for more details.
 
-rc_tagdetect_client
--------------------
+Launch
+------
 
-**This package is not developed anymore**. New clients are available in the
-[rc_reason_clients_ros repository](https://github.com/roboception/rc_reason_clients_ros/tree/master/rc_reason_clients#rc_april_tag_detect_client-and-rc_qr_code_detect_client).
+Using command line parameters:
 
-ROS client for rc_visard's tag detection modules.
-See the [rc_tagdetect_client README](rc_tagdetect_client/README.md) for more details
+**For the ItemPick module:**
 
-rc_silhouettematch_client
--------------------------
+~~~
+rosrun rc_pick_client rc_itempick_client_node _device:=:<serial_number>
+~~~
 
-**This package is not developed anymore**. A new client is available in the
-[rc_reason_clients_ros repository](https://github.com/roboception/rc_reason_clients_ros/tree/master/rc_reason_clients#rc_silhouettematch_client).
+**For the BoxPick module:**
 
-ROS client for rc_visard's SilhouetteMatch module.
-See the [rc_silhouettematch_client README](rc_silhouettematch_client/README.md) for more details
-
-Acknowledgements
-----------------
-
-This FTP (Focused Technical Project) has received funding from the European Union’s Horizon 2020 research and innovation programme under the project ROSIN with the grant agreement No 732287.
-
-ROSIN: ROS-Industrial Quality-Assured Robot Software Components: http://rosin-project.eu
-
-![EU flag](rosin_eu_flag.jpg) ![ROSIN logo](rosin_ack_logo_wide.png)
-
-[Roboception rc_visard]: http://roboception.com/rc_visard
+~~~
+rosrun rc_pick_client rc_boxpick_client_node _device:=:<serial_number>
+~~~
