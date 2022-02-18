@@ -98,7 +98,21 @@ namespace {
     }
     return device_ids;
   }
-}
+
+  void split(std::vector<std::string>& list, const std::string& s, char delim, bool skip_empty = true)
+  {
+    std::stringstream in(s);
+    std::string elem;
+
+    while (getline(in, elem, delim))
+    {
+      if (!skip_empty || elem.size() > 0)
+      {
+        list.push_back(elem);
+      }
+    }
+  }
+}  // namespace
 
 namespace rc
 {
@@ -131,7 +145,6 @@ DeviceNodelet::DeviceNodelet()
   reconfig = 0;
   dev_supports_gain = false;
   dev_supports_color = false;
-  dev_supports_chunk_data = false;
   dev_supports_wb = false;
   dev_supports_depth_acquisition_trigger = false;
   perform_depth_acquisition_trigger = false;
@@ -346,26 +359,30 @@ void DeviceNodelet::keepAliveAndRecoverFromFails()
         rcgdev->open(access_id);
         rcgnodemap = rcgdev->getRemoteNodeMap();
 
-        // in newer rc_visard image versions, we can check via genicam if rc_visard is ready
+        // ensure that device version >= 20.04
 
-        try {
-          bool isReady = rcg::getBoolean(rcgnodemap, "RcSystemReady", true, true);
-          if (!isReady)
-          {
-            ROS_INFO_STREAM("rc_visard_driver: rc_visard device not yet ready (GEV). Trying again...");
-            continue;  // to next trial!
-          }
-        } catch (std::invalid_argument& e)
+        dev_version = rcg::getString(rcgnodemap, "DeviceVersion");
+
+        std::vector<std::string> list;
+        split(list, dev_version, '.');
+
+        if (list.size() < 3 || std::stoi(list[0]) < 20 || (std::stoi(list[0]) == 20 && std::stoi(list[1]) < 4))
         {
-          // genicam feature is not implemented in this version of rc_visard's firmware,
-          // so we have to assume rc_visard is ready and continue
+          throw std::invalid_argument("Device version must be 20.04 or higher: " + dev_version);
+        }
+
+        // check if device is ready
+
+        if (!rcg::getBoolean(rcgnodemap, "RcSystemReady", true, true))
+        {
+          ROS_INFO_STREAM("rc_visard_driver: rc_visard device not yet ready (GEV). Trying again...");
+          continue;  // to next trial!
         }
 
         // extract some diagnostics data from device
         dev_serialno = rcg::getString(rcgnodemap, "DeviceID", true);
         dev_macaddr = rcg::getString(rcgnodemap, "GevMACAddress", true);
         dev_ipaddr = rcg::getString(rcgnodemap, "GevCurrentIPAddress", true);
-        dev_version = rcg::getString(rcgnodemap, "DeviceVersion", true);
         gev_userid = rcg::getString(rcgnodemap, "DeviceUserID", true);
         gev_packet_size = rcg::getString(rcgnodemap, "GevSCPSPacketSize", true);
 
@@ -628,14 +645,6 @@ void DeviceNodelet::initConfiguration(const std::shared_ptr<GenApi::CNodeMapRef>
 
   cfg.ptp_enabled = rcg::getBoolean(nodemap, "PtpEnable", false);
 
-  // fix for rc_visard < 1.5
-
-  if (cfg.depth_quality[0] == 'S')
-  {
-    cfg.depth_quality = "High";
-    cfg.depth_static_scene = true;
-  }
-
   // check for stereo_plus license
 
   try
@@ -669,10 +678,6 @@ void DeviceNodelet::initConfiguration(const std::shared_ptr<GenApi::CNodeMapRef>
 
   try
   {
-    // disable filtering images on the sensor
-
-    rcg::setEnum(nodemap, "AcquisitionAlternateFilter", "Off", false);
-
     // get current values
 
     rcg::setEnum(nodemap, "LineSelector", "Out1", true);
@@ -703,12 +708,9 @@ void DeviceNodelet::initConfiguration(const std::shared_ptr<GenApi::CNodeMapRef>
   // enabling chunk data for getting live camera/image parameters
   // (e.g. line status, current gain and exposure, etc.)
 
-  dev_supports_chunk_data = rcg::setBoolean(nodemap, "ChunkModeActive", true, false);
-  if (!dev_supports_chunk_data)
-  {
-    ROS_WARN("rc_visard_driver: rc_visard has an older firmware that does not support chunk data.");
-
-  }
+  rcg::setEnum(nodemap, "AcquisitionAlternateFilter", "Off", false);
+  rcg::setEnum(nodemap, "AcquisitionMultiPartMode", "SingleComponent", true);
+  rcg::setBoolean(nodemap, "ChunkModeActive", true, true);
 
   try
   {
@@ -1518,10 +1520,7 @@ void DeviceNodelet::grab(std::string device, rcg::Device::ACCESS access)
       // prepare chunk adapter for getting chunk data
 
       std::shared_ptr<GenApi::CChunkAdapter> chunkadapter;
-      if (dev_supports_chunk_data)
-      {
-        chunkadapter = rcg::getChunkAdapter(rcgnodemap, rcgdev->getTLType());
-      }
+      chunkadapter = rcg::getChunkAdapter(rcgnodemap, rcgdev->getTLType());
 
       // initialize all publishers
 
@@ -1556,13 +1555,8 @@ void DeviceNodelet::grab(std::string device, rcg::Device::ACCESS access)
 
       // add camera/image params publishers if the camera supports chunkdata
 
-      std::shared_ptr<CameraParamPublisher> lcamparams;
-      std::shared_ptr<CameraParamPublisher> rcamparams;
-      if (dev_supports_chunk_data)
-      {
-        lcamparams = std::make_shared<CameraParamPublisher>(nh, tfPrefix, true);
-        rcamparams = std::make_shared<CameraParamPublisher>(nh, tfPrefix, false);
-      }
+      std::shared_ptr<CameraParamPublisher> lcamparams = std::make_shared<CameraParamPublisher>(nh, tfPrefix, true);
+      std::shared_ptr<CameraParamPublisher> rcamparams = std::make_shared<CameraParamPublisher>(nh, tfPrefix, false);
 
       // start streaming of first stream
 
@@ -1618,7 +1612,17 @@ void DeviceNodelet::grab(std::string device, rcg::Device::ACCESS access)
             bool out1_alternate = (out1_mode_on_sensor == "ExposureAlternateActive");
             points2.setOut1Alternate(out1_alternate);
 
-            rc_common_msgs::CameraParam cam_param = extractChunkData(rcgnodemap);
+            rc_common_msgs::CameraParam cam_param;
+
+            {
+              // protect against concurent changes of selector (i.e. LineSelector),
+              // before reading the corresponding value
+
+              boost::recursive_mutex::scoped_lock lock(mtx);
+
+              cam_param = extractChunkData(rcgnodemap);
+            }
+
             cam_param.is_color_camera = dev_supports_color;
             out1 = (cam_param.line_status_all & 0x1);
 
