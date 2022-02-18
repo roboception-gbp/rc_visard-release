@@ -1,6 +1,0 @@
-# Description: Deletes the configured base-plane calibration.
-
-#No request data
----
-
-rc_common_msgs/ReturnCode return_code
